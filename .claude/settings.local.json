@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python ibeam_sli_generator.py --L 6 --h1 0.5 --h2 0.5 --nx 2 --ny 4 --nw 4 --out output)",
+      "Bash(PYTHONIOENCODING=utf-8 python ibeam_sli_generator.py --L 6 --h1 0.5 --h2 0.5 --nx 2 --ny 4 --nw 4 --out output)",
+      "Bash(PYTHONIOENCODING=utf-8 python ibeam_sli_generator.py --L 8 --h1 0.6 --h2 1.0 --nx 2 --ny 8 --nw 4 --q 1.0 --name test_load --out output)"
+    ]
+  }
+}

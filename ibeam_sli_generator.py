@@ -12,9 +12,9 @@
   Z — висота перерізу (вертикальний напрямок)
 
 Структура балки:
-  - Верхня полиця:  Z = h(y)/2 .. h(y)/2 + tf
+  - Верхня полиця:  Z = h_w(y)/2  (один пояс на межі зі стінкою)
   - Стінка:         Z = -h_w(y)/2 .. h_w(y)/2
-  - Нижня полиця:   Z = -h(y)/2 - tf .. -h(y)/2
+  - Нижня полиця:   Z = -h_w(y)/2 (один пояс на межі зі стінкою)
 
 Матеріали:
   Material 1 — полиці (H = tf)
@@ -101,6 +101,7 @@ class IBeamMesh:
         self.elements: List[Quad] = []
         self._nid = 1
         self._eid = 1
+        self._top_flange: Dict[Tuple[int, int], int] = {}  # (j_y, i_x) → node_id
 
     def _n(self, x, y, z) -> int:
         nid = self._nid
@@ -144,8 +145,8 @@ class IBeamMesh:
         # ── 2. ПОЛИЦІ ─────────────────────────────────────────────
         # Верхня та нижня полиці
         # X: від -bf/2 до +bf/2, розбито на 2*nx ділянок
-        # Верхня: Z від hw/2 до hw/2 + tf
-        # Нижня:  Z від -hw/2 - tf до -hw/2
+        # Верхня: Z = hw/2   (на межі зі стінкою)
+        # Нижня:  Z = -hw/2  (на межі зі стінкою)
 
         x_cuts = [-p.bf/2 + p.bf * i / (2 * p.nx) for i in range(2 * p.nx + 1)]
 
@@ -154,13 +155,11 @@ class IBeamMesh:
 
             for j, y in enumerate(y_cuts):
                 hw = p.hw(y)
-                # Z координати двох рядів полиці
+                # Z координата полиці (на межі зі стінкою)
                 if sign == +1:
                     z_inner = hw / 2           # межа зі стінкою
-                    z_outer = hw / 2 + p.tf    # зовнішня кромка
                 else:
                     z_inner = -hw / 2
-                    z_outer = -hw / 2 - p.tf
 
                 for i, x in enumerate(x_cuts):
                     # Вузли на межі зі стінкою (inner)
@@ -173,8 +172,12 @@ class IBeamMesh:
                     else:
                         fl_grid[(j, i, 'inner')] = self._n(x, y, z_inner)
 
-                    # Зовнішній ряд вузлів
-                    fl_grid[(j, i, 'outer')] = self._n(x, y, z_outer)
+
+            # Зберігаємо вузли верхньої полиці для навантаження
+            if sign == +1:
+                for j in range(p.ny + 1):
+                    for i in range(2 * p.nx + 1):
+                        self._top_flange[(j, i)] = fl_grid[(j, i, 'inner')]
 
             # Елементи полиці
             for j in range(p.ny):
@@ -185,11 +188,6 @@ class IBeamMesh:
                     n4 = fl_grid[(j,   i+1, 'inner')]
                     self._q(n1, n2, n3, n4, mat=1)  # полиця → mat 1
 
-                    n1 = fl_grid[(j,   i,   'outer')]
-                    n2 = fl_grid[(j+1, i,   'outer')]
-                    n3 = fl_grid[(j+1, i+1, 'outer')]
-                    n4 = fl_grid[(j,   i+1, 'outer')]
-                    self._q(n1, n2, n3, n4, mat=1)
 
         return self.nodes, self.elements
 
@@ -215,27 +213,43 @@ class IBeamMesh:
 
     def nodal_forces(self, y_min: float, y_max: float) -> List[Tuple[int, float]]:
         """
-        Вузлові сили на верхній кромці в діапазоні [y_min, y_max].
-        F = -q * (dy_left + dy_right)/2 * bf  (мінус = вниз по Z)
+        Вузлові сили на ВСІХ вузлах верхньої полиці в діапазоні [y_min, y_max].
+        F = -q * dx * dy  (вантажна площа кожного вузла, мінус = вниз по Z)
         NDOF=3 відповідає Z у ЛІРА sli-форматі.
         """
-        top = self.top_outer_nodes()
-        ys  = [yv for yv, _ in top]
+        p = self.p
+        y_cuts = [p.L * j / p.ny for j in range(p.ny + 1)]
+        x_cuts = [-p.bf/2 + p.bf * i / (2 * p.nx) for i in range(2 * p.nx + 1)]
+
         forces = []
-        for i, (yv, nid) in enumerate(top):
-            if yv < y_min - 1e-9 or yv > y_max + 1e-9:
+        for j in range(p.ny + 1):
+            y = y_cuts[j]
+            if y < y_min - 1e-9 or y > y_max + 1e-9:
                 continue
-            dy_l = (yv - ys[i-1]) / 2 if i > 0          else 0.0
-            dy_r = (ys[i+1] - yv) / 2 if i < len(ys)-1  else 0.0
-            if abs(yv - y_min) < 1e-9 and i > 0:
+
+            # Вантажна довжина по Y
+            dy_l = (y - y_cuts[j-1]) / 2 if j > 0    else 0.0
+            dy_r = (y_cuts[j+1] - y) / 2 if j < p.ny else 0.0
+            if abs(y - y_min) < 1e-9 and j > 0:
                 dy_l = 0.0
-            if abs(yv - y_max) < 1e-9 and i < len(ys)-1:
+            if abs(y - y_max) < 1e-9 and j < p.ny:
                 dy_r = 0.0
             dy = dy_l + dy_r
             if dy < 1e-12:
                 continue
-            F = -self.p.q * dy * self.p.bf   # кН (q в кН/м²)
-            forces.append((nid, F))
+
+            for i in range(2 * p.nx + 1):
+                # Вантажна ширина по X
+                dx_l = (x_cuts[i] - x_cuts[i-1]) / 2 if i > 0          else 0.0
+                dx_r = (x_cuts[i+1] - x_cuts[i]) / 2 if i < 2 * p.nx   else 0.0
+                dx = dx_l + dx_r
+                if dx < 1e-12:
+                    continue
+
+                nid = self._top_flange[(j, i)]
+                F = -p.q * dx * dy   # кН (q в кН/м²)
+                forces.append((nid, F))
+
         return forces
 
 
