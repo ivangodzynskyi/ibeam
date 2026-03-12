@@ -63,6 +63,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     # ── Будуємо криві меандру ─────────────────────────────────
     curves = []
     prev_pt_id = None
+    center_pt_ids = set()  # точки-центри дуг (не включати в меш)
 
     for i, item in enumerate(items):
         if isinstance(item, Point):
@@ -74,6 +75,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
             p1_id = add_pt(item.p1.x, item.p1.y)
             p2_id = add_pt(item.p2.x, item.p2.y)
             pc_id = add_pt(item.p_center.x, item.p_center.y)
+            center_pt_ids.add(pc_id)
 
             # Лінія від попередньої точки до початку дуги
             if prev_pt_id is not None and prev_pt_id != p1_id:
@@ -106,12 +108,15 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
     gmsh.model.mesh.generate(2)
 
-    # ── Витягуємо вузли ──────────────────────────────────────
+    # ── Витягуємо вузли (без центрів дуг) ────────────────────
     node_tags, coords, _ = gmsh.model.mesh.getNodes()
     nodes: List[Node] = []
     tag_to_id = {}
+    nid = 0
     for i, tag in enumerate(node_tags):
-        nid = i + 1
+        if int(tag) in center_pt_ids:
+            continue
+        nid += 1
         tag_to_id[int(tag)] = nid
         x = round(coords[3 * i], 8)
         y = round(coords[3 * i + 1], 8)
