@@ -3,7 +3,7 @@
   Генератор меш-сітки меандру (gmsh) → ЛІРА САПР .sli
 ================================================================
 
-Будує 2D меш для контуру:
+Будує 2D меш для контуру в площині XOZ:
   - верхня грань — крива меандру (лінії + філлети)
   - права грань  — від кінця меандру вниз на h2
   - нижня грань  — пряма від (length, -height-h2) до (0, -h1)
@@ -53,10 +53,11 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     # ── Допоміжна функція: створити gmsh-точку ───────────────
     point_cache = {}
 
-    def add_pt(x: float, y: float) -> int:
-        key = (round(x, 10), round(y, 10))
+    def add_pt(x: float, z: float) -> int:
+        """Створює gmsh-точку в площині XOZ (y=0)."""
+        key = (round(x, 10), round(z, 10))
         if key not in point_cache:
-            point_cache[key] = geo.addPoint(x, y, 0, mesh_size)
+            point_cache[key] = geo.addPoint(x, 0, z, mesh_size)
         return point_cache[key]
 
     # ── Будуємо криві меандру ─────────────────────────────────
