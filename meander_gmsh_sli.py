@@ -28,7 +28,7 @@ from sli_writer import write_plate_sli
 
 
 def generate(cfg: Config, mesh_size: float = 0.05,
-             use_quads: bool = False, thickness: float = 0.01,
+             use_quads: bool = False,
              E: float = 2.02027e7, nu: float = 0.28, rho: float = 7850.0,
              name: str = "meander", output: str = "meander.sli"):
     """Будує меш контуру з меандром через gmsh, зберігає .sli."""
@@ -208,8 +208,8 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
-        {"num": 1, "H": thickness, "F": nu, "E": E, "Ro": rho},
-        {"num": 2, "H": thickness, "F": nu, "E": E, "Ro": rho},
+        {"num": 1, "H": cfg.tw, "F": nu, "E": E, "Ro": rho},
+        {"num": 2, "H": cfg.tb, "F": nu, "E": E, "Ro": rho},
     ]
 
     filepath = output if output.endswith('.sli') else output + '.sli'
@@ -240,8 +240,6 @@ if __name__ == "__main__":
                         help="Розмір елемента, м (default: 0.05)")
     parser.add_argument("--quads", action="store_true",
                         help="Рекомбінувати трикутники в квади")
-    parser.add_argument("--thickness", type=float, default=0.01,
-                        help="Товщина, м (default: 0.01)")
     parser.add_argument("--name", type=str, default="meander",
                         help="Назва моделі (default: meander)")
     parser.add_argument("--output", type=str, default="meander.sli",
@@ -250,4 +248,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     cfg = Config()
     generate(cfg, mesh_size=args.mesh_size, use_quads=args.quads,
-             thickness=args.thickness, name=args.name, output=args.output)
+             name=args.name, output=args.output)

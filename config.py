@@ -16,3 +16,5 @@ class Config:
     h2: float = 0.3
     bf: float = 0.2       # ширина полки (flange width, Y-direction)
     nb: int = 4           # кількість проміжків на кожній стороні полки
+    tw: float = 0.008     # товщина стінки
+    tb: float = 0.012     # товщина полки
