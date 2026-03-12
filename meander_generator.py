@@ -28,13 +28,15 @@ class MeanderGenerator:
     """
 
     @staticmethod
-    def generate(length: float, height: float, periods: int) -> List[Point]:
+    def generate(length: float, height: float, periods: int,
+                 k_angle: float = 0.0) -> List[Point]:
         """Генерує точки прямокутного імпульсу.
 
         Args:
             length:  довжина по координаті X.
             height:  висота перепаду по Y (сигнал опускається на -height).
             periods: кількість напівперіодів (сегментів).
+            k_angle: зсув по X для нахилу вертикальних переходів.
 
         Returns:
             Список точок (x, y), що описують меандр.
@@ -56,9 +58,20 @@ class MeanderGenerator:
             # Горизонтальний сегмент
             points.append(Point(x_end, y_level))
 
+        # Застосувати нахил до вертикальних переходів
+        if k_angle != 0.0:
+            for i in range(1, len(points) - 1):
+                if i % 2 == 1:
+                    points[i].x -= k_angle
+                else:
+                    points[i].x += k_angle
+
         return points
 
 
 if __name__ == "__main__":
     pts = MeanderGenerator.generate(length=6, height=2, periods=6)
-    print(", ".join(str(p) for p in pts))
+    print("k_angle=0:  ", ", ".join(str(p) for p in pts))
+
+    pts = MeanderGenerator.generate(length=6, height=2, periods=6, k_angle=0.1)
+    print("k_angle=0.1:", ", ".join(str(p) for p in pts))
