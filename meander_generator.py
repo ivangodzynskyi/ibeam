@@ -3,8 +3,7 @@
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple
-
+from typing import List, Tuple, Union
 
 @dataclass
 class Point:
@@ -18,6 +17,16 @@ class Point:
 
     def __repr__(self):
         return f"({self.x}, {self.y})"
+
+
+@dataclass
+class Fillet:
+    p1: Point
+    p2: Point
+    p_center: Point
+
+    def __repr__(self):
+        return f"Fillet(p1={self.p1}, p2={self.p2}, pCenter={self.p_center})"
 
 
 class MeanderGenerator:
@@ -68,6 +77,42 @@ class MeanderGenerator:
 
         return points
 
+    @staticmethod
+    def generate_with_fillets(length: float, height: float, periods: int,
+                              radius: float,
+                              k_angle: float = 0.0) -> List[Union[Point, Fillet]]:
+        """Генерує меандр зі скругленнями у кутових точках.
+
+        Кожна проміжна точка (кут) замінюється на об'єкт Fillet,
+        який описує дугу скруглення трьома параметрами:
+        p1, p2 — точки дотику, p_center — центр кола.
+
+        Args:
+            length:  довжина по координаті X.
+            height:  висота перепаду по Y.
+            periods: кількість напівперіодів.
+            radius:  радіус скруглення.
+            k_angle: зсув по X для нахилу вертикальних переходів.
+
+        Returns:
+            Список, де перша та остання точки залишаються Point,
+            а кожна проміжна кутова точка замінена на Fillet.
+        """
+        from fillet import compute_fillet
+
+        points = MeanderGenerator.generate(length, height, periods, k_angle)
+        if len(points) < 3:
+            return list(points)
+
+        result: List[Union[Point, Fillet]] = [points[0]]
+
+        for i in range(1, len(points) - 1):
+            fr = compute_fillet(points[i - 1], points[i], points[i + 1], radius=radius)
+            result.append(Fillet(p1=fr.R1, p2=fr.R2, p_center=fr.RC))
+
+        result.append(points[-1])
+        return result
+
 
 if __name__ == "__main__":
     pts = MeanderGenerator.generate(length=6, height=2, periods=6)
@@ -75,3 +120,8 @@ if __name__ == "__main__":
 
     pts = MeanderGenerator.generate(length=6, height=2, periods=6, k_angle=0.1)
     print("k_angle=0.1:", ", ".join(str(p) for p in pts))
+
+    print("\nWith fillets (radius=0.2):")
+    items = MeanderGenerator.generate_with_fillets(length=6, height=2, periods=6, radius=0.2)
+    for item in items:
+        print(f"  {item}")
