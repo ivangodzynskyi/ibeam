@@ -90,9 +90,10 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     p_br = add_pt(cfg.length, last_y - cfg.h2)
     curves.append(geo.addLine(prev_pt_id, p_br))
 
-    # → (0, -h1)
+    # → (0, -h1)  — edgeLine (нижня грань стінки)
     p_bl = add_pt(0, -cfg.h1)
-    curves.append(geo.addLine(p_br, p_bl))
+    edge_line_tag = geo.addLine(p_br, p_bl)
+    curves.append(edge_line_tag)
 
     # → (0, 0) — замикання
     p_start = add_pt(0, 0)
@@ -107,6 +108,17 @@ def generate(cfg: Config, mesh_size: float = 0.05,
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
 
     gmsh.model.mesh.generate(2)
+
+    # ── Витягуємо вузли edgeLine (до finalize!) ────────────────
+    edge_tags_raw, edge_crds_raw, _ = gmsh.model.mesh.getNodes(
+        dim=1, tag=abs(edge_line_tag), includeBoundary=True,
+    )
+    edge_pts = []
+    for i, tag in enumerate(edge_tags_raw):
+        ex = round(edge_crds_raw[3 * i], 8)
+        ez = round(edge_crds_raw[3 * i + 2], 8)
+        edge_pts.append((ex, ez, int(tag)))
+    edge_pts.sort(key=lambda p: p[0])  # сортуємо по X
 
     # ── Витягуємо вузли (без центрів дуг) ────────────────────
     node_tags, coords, _ = gmsh.model.mesh.getNodes()
@@ -154,9 +166,50 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
     gmsh.finalize()
 
+    # ── Полка: меш-сітка вздовж edgeLine (Y-direction) ─────────
+    flange_quad_count = 0
+    if cfg.nb > 0 and cfg.bf > 0:
+        dy = cfg.bf / (2 * cfg.nb)
+        n_edge = len(edge_pts)
+
+        # edge_grid[(i, j)] → node_id
+        # i — індекс вздовж edgeLine, j — індекс по Y
+        # j = 0 → y = -bf/2,  j = nb → y = 0,  j = 2*nb → y = bf/2
+        edge_grid = {}
+
+        for i, (ex, ez, gmsh_tag) in enumerate(edge_pts):
+            # Вузол на y=0 вже існує (стінка)
+            edge_grid[(i, cfg.nb)] = tag_to_id[gmsh_tag]
+
+            # Додатній бік Y (від 0 до bf/2)
+            for j in range(1, cfg.nb + 1):
+                y_val = round(j * dy, 8)
+                nid += 1
+                nodes.append(Node(nid, ex, y_val, ez))
+                edge_grid[(i, cfg.nb + j)] = nid
+
+            # Від'ємний бік Y (від 0 до -bf/2)
+            for j in range(1, cfg.nb + 1):
+                y_val = round(-j * dy, 8)
+                nid += 1
+                nodes.append(Node(nid, ex, y_val, ez))
+                edge_grid[(i, cfg.nb - j)] = nid
+
+        # Прямокутні елементи полки
+        for i in range(n_edge - 1):
+            for j in range(2 * cfg.nb):
+                n1 = edge_grid[(i, j)]
+                n2 = edge_grid[(i + 1, j)]
+                n3 = edge_grid[(i + 1, j + 1)]
+                n4 = edge_grid[(i, j + 1)]
+                elements.append(Quad(eid, n1, n2, n3, n4, mat=2))
+                eid += 1
+                flange_quad_count += 1
+
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
-        {"num": 1, "H": thickness, "F": nu, "E": E, "Ro": rho}
+        {"num": 1, "H": thickness, "F": nu, "E": E, "Ro": rho},
+        {"num": 2, "H": thickness, "F": nu, "E": E, "Ro": rho},
     ]
 
     filepath = output if output.endswith('.sli') else output + '.sli'
@@ -167,11 +220,13 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     print(f"{'=' * 60}")
     print(f"  length={cfg.length}, height={cfg.height}, "
           f"periods={cfg.periods}, radius={cfg.radius}")
-    print(f"  h1={cfg.h1}, h2={cfg.h2}")
+    print(f"  h1={cfg.h1}, h2={cfg.h2}, bf={cfg.bf}, nb={cfg.nb}")
     print(f"  Крок сітки : {mesh_size} м")
     print(f"  Вузлів     : {len(nodes)}")
-    print(f"  Елементів  : {len(elements)} "
+    print(f"  Стінка     : {quad_count + tri_count} "
           f"(quad={quad_count}, tri={tri_count})")
+    print(f"  Полка      : {flange_quad_count} quad")
+    print(f"  Всього ел. : {len(elements)}")
     print(f"  Файл       : {filepath}")
 
     return filepath

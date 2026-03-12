@@ -14,3 +14,5 @@ class Config:
     k_angle: float = 0.04
     h1: float = 0.2
     h2: float = 0.3
+    bf: float = 0.2       # ширина полки (flange width, Y-direction)
+    nb: int = 4           # кількість проміжків на кожній стороні полки
