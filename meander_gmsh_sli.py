@@ -1,0 +1,192 @@
+"""
+================================================================
+  Генератор меш-сітки меандру (gmsh) → ЛІРА САПР .sli
+================================================================
+
+Будує 2D меш для контуру:
+  - верхня грань — крива меандру (лінії + філлети)
+  - права грань  — від кінця меандру вниз на h2
+  - нижня грань  — пряма від (length, -height-h2) до (0, -h1)
+  - ліва грань   — пряма від (0, -h1) до (0, 0)
+
+ВИКОРИСТАННЯ:
+  python meander_gmsh_sli.py
+  python meander_gmsh_sli.py --quads
+  python meander_gmsh_sli.py --mesh-size 0.02
+"""
+
+import argparse
+import math
+from typing import List
+
+import gmsh
+
+from config import Config
+from meander_generator import MeanderGenerator, Point, Fillet
+from ibeam_sli_generator import Node, Quad
+from sli_writer import write_plate_sli
+
+
+def generate(cfg: Config, mesh_size: float = 0.05,
+             use_quads: bool = False, thickness: float = 0.01,
+             E: float = 2.02027e7, nu: float = 0.28, rho: float = 7850.0,
+             name: str = "meander", output: str = "meander.sli"):
+    """Будує меш контуру з меандром через gmsh, зберігає .sli."""
+
+    # ── Генеруємо криву меандру ───────────────────────────────
+    items = MeanderGenerator.generate_with_fillets(
+        length=cfg.length, height=cfg.height,
+        periods=cfg.periods, radius=cfg.radius,
+        k_angle=cfg.k_angle,
+    )
+
+    # Остання точка меандру
+    last_meander = items[-1]
+    last_x = last_meander.x if isinstance(last_meander, Point) else last_meander.p2.x
+    last_y = last_meander.y if isinstance(last_meander, Point) else last_meander.p2.y
+
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.model.add("meander")
+    geo = gmsh.model.geo
+
+    # ── Допоміжна функція: створити gmsh-точку ───────────────
+    point_cache = {}
+
+    def add_pt(x: float, y: float) -> int:
+        key = (round(x, 10), round(y, 10))
+        if key not in point_cache:
+            point_cache[key] = geo.addPoint(x, y, 0, mesh_size)
+        return point_cache[key]
+
+    # ── Будуємо криві меандру ─────────────────────────────────
+    curves = []
+    prev_pt_id = None
+
+    for i, item in enumerate(items):
+        if isinstance(item, Point):
+            pt_id = add_pt(item.x, item.y)
+            if prev_pt_id is not None and prev_pt_id != pt_id:
+                curves.append(geo.addLine(prev_pt_id, pt_id))
+            prev_pt_id = pt_id
+        elif isinstance(item, Fillet):
+            p1_id = add_pt(item.p1.x, item.p1.y)
+            p2_id = add_pt(item.p2.x, item.p2.y)
+            pc_id = add_pt(item.p_center.x, item.p_center.y)
+
+            # Лінія від попередньої точки до початку дуги
+            if prev_pt_id is not None and prev_pt_id != p1_id:
+                curves.append(geo.addLine(prev_pt_id, p1_id))
+
+            # Дуга філлету
+            curves.append(geo.addCircleArc(p1_id, pc_id, p2_id))
+            prev_pt_id = p2_id
+
+    # ── Замикаючі лінії ──────────────────────────────────────
+    # Кінець меандру → (length, -height - h2)
+    p_br = add_pt(cfg.length, last_y - cfg.h2)
+    curves.append(geo.addLine(prev_pt_id, p_br))
+
+    # → (0, -h1)
+    p_bl = add_pt(0, -cfg.h1)
+    curves.append(geo.addLine(p_br, p_bl))
+
+    # → (0, 0) — замикання
+    p_start = add_pt(0, 0)
+    curves.append(geo.addLine(p_bl, p_start))
+
+    # ── Поверхня ─────────────────────────────────────────────
+    loop = geo.addCurveLoop(curves)
+    geo.addPlaneSurface([loop])
+    geo.synchronize()
+
+    if use_quads:
+        gmsh.option.setNumber("Mesh.RecombineAll", 1)
+
+    gmsh.model.mesh.generate(2)
+
+    # ── Витягуємо вузли ──────────────────────────────────────
+    node_tags, coords, _ = gmsh.model.mesh.getNodes()
+    nodes: List[Node] = []
+    tag_to_id = {}
+    for i, tag in enumerate(node_tags):
+        nid = i + 1
+        tag_to_id[int(tag)] = nid
+        x = round(coords[3 * i], 8)
+        y = round(coords[3 * i + 1], 8)
+        z = round(coords[3 * i + 2], 8)
+        nodes.append(Node(nid, x, y, z))
+
+    # ── Витягуємо елементи (dim=2) ───────────────────────────
+    elem_types, elem_tags_list, elem_node_tags_list = \
+        gmsh.model.mesh.getElements(dim=2)
+
+    elements: List[Quad] = []
+    eid = 1
+    tri_count = 0
+    quad_count = 0
+
+    for et, tags, ntags in zip(elem_types, elem_tags_list,
+                               elem_node_tags_list):
+        if et == 2:  # 3-node triangle
+            for i in range(len(tags)):
+                n1 = tag_to_id[int(ntags[i * 3])]
+                n2 = tag_to_id[int(ntags[i * 3 + 1])]
+                n3 = tag_to_id[int(ntags[i * 3 + 2])]
+                elements.append(Quad(eid, n1, n2, n3, 0, mat=1))
+                eid += 1
+                tri_count += 1
+        elif et == 3:  # 4-node quad
+            for i in range(len(tags)):
+                n1 = tag_to_id[int(ntags[i * 4])]
+                n2 = tag_to_id[int(ntags[i * 4 + 1])]
+                n3 = tag_to_id[int(ntags[i * 4 + 2])]
+                n4 = tag_to_id[int(ntags[i * 4 + 3])]
+                elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
+                eid += 1
+                quad_count += 1
+
+    gmsh.finalize()
+
+    # ── Записуємо .sli ───────────────────────────────────────
+    materials = [
+        {"num": 1, "H": thickness, "F": nu, "E": E, "Ro": rho}
+    ]
+
+    filepath = output if output.endswith('.sli') else output + '.sli'
+    write_plate_sli(name, nodes, elements, materials, filepath)
+
+    print(f"\n{'=' * 60}")
+    print(f"  Меандр: {name}")
+    print(f"{'=' * 60}")
+    print(f"  length={cfg.length}, height={cfg.height}, "
+          f"periods={cfg.periods}, radius={cfg.radius}")
+    print(f"  h1={cfg.h1}, h2={cfg.h2}")
+    print(f"  Крок сітки : {mesh_size} м")
+    print(f"  Вузлів     : {len(nodes)}")
+    print(f"  Елементів  : {len(elements)} "
+          f"(quad={quad_count}, tri={tri_count})")
+    print(f"  Файл       : {filepath}")
+
+    return filepath
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Генератор меш-сітки меандру (gmsh) → ЛІРА САПР .sli"
+    )
+    parser.add_argument("--mesh-size", type=float, default=0.05,
+                        help="Розмір елемента, м (default: 0.05)")
+    parser.add_argument("--quads", action="store_true",
+                        help="Рекомбінувати трикутники в квади")
+    parser.add_argument("--thickness", type=float, default=0.01,
+                        help="Товщина, м (default: 0.01)")
+    parser.add_argument("--name", type=str, default="meander",
+                        help="Назва моделі (default: meander)")
+    parser.add_argument("--output", type=str, default="meander.sli",
+                        help="Вихідний файл (default: meander.sli)")
+
+    args = parser.parse_args()
+    cfg = Config()
+    generate(cfg, mesh_size=args.mesh_size, use_quads=args.quads,
+             thickness=args.thickness, name=args.name, output=args.output)

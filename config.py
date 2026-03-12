@@ -7,10 +7,10 @@ from dataclasses import dataclass
 
 @dataclass
 class Config:
-    radius: float = 0.2
+    radius: float = 0.03
     length: float = 6.0
     height: float = 0.1
-    periods: int = 6
-    k_angle: float = 0.1
+    periods: int = 12
+    k_angle: float = 0.04
     h1: float = 0.2
     h2: float = 0.3
