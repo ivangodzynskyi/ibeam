@@ -270,6 +270,80 @@ def generate(cfg: Config, mesh_size: float = 0.05,
         eid += 1
         x_mirror_count += 1
 
+    # ── Середнє ребро (x=0, площина YOZ) ─────────────────────
+    #    Прямокутник: y ∈ [0, bf/2], z ∈ [-(height+h2), height+h2]
+    #    Спільні вузли з існуючими сітками при x ≈ 0
+    rib_elem_count = 0
+    if cfg.nb > 0 and cfg.bf > 0:
+        rib_x_tol = 1e-6
+        rib_y_tol = 1e-6
+
+        # 1. Зібрати всі z-значення вузлів на осі x=0, y=0
+        z_axis = {}  # round(z,8) → node_id
+        for node in nodes:
+            if abs(node.x) < rib_x_tol and abs(node.y) < rib_y_tol:
+                z_axis[round(node.z, 8)] = node.id
+
+        z_vals = sorted(z_axis.keys())
+
+        # 2. Розбити проміжки де z змінює знак
+        extra_z = []
+        for k in range(len(z_vals) - 1):
+            z1, z2 = z_vals[k], z_vals[k + 1]
+            if z1 < -rib_x_tol and z2 > rib_x_tol:
+                gap = z2 - z1
+                n_sub = max(2, round(gap / mesh_size))
+                dz = gap / n_sub
+                for s in range(1, n_sub):
+                    extra_z.append(round(z1 + s * dz, 8))
+                # гарантувати z=0
+                if not any(abs(zz) < rib_x_tol for zz in extra_z):
+                    extra_z.append(0.0)
+
+        # Додати нові вузли на осі
+        for zv in extra_z:
+            zk = round(zv, 8)
+            if zk not in z_axis:
+                nid += 1
+                nodes.append(Node(nid, 0.0, 0.0, zv))
+                z_axis[zk] = nid
+
+        z_vals = sorted(z_axis.keys())
+
+        # 3. Побудувати lookup для існуючих вузлів при x ≈ 0
+        rib_lookup = {}  # (y_round, z_round) → node_id
+        for node in nodes:
+            if abs(node.x) < rib_x_tol:
+                key = (round(node.y, 6), round(node.z, 6))
+                rib_lookup[key] = node.id
+
+        # 4. Побудувати сітку rib_grid[(iz, iy)] → node_id
+        dy = cfg.bf / (2 * cfg.nb)
+        rib_grid = {}
+
+        for iz, zv in enumerate(z_vals):
+            for iy in range(cfg.nb + 1):
+                y_val = round(iy * dy, 8)
+                key = (round(y_val, 6), round(zv, 6))
+                if key in rib_lookup:
+                    rib_grid[(iz, iy)] = rib_lookup[key]
+                else:
+                    nid += 1
+                    nodes.append(Node(nid, 0.0, y_val, zv))
+                    rib_lookup[key] = nid
+                    rib_grid[(iz, iy)] = nid
+
+        # 5. Прямокутні елементи ребра
+        for iz in range(len(z_vals) - 1):
+            for iy in range(cfg.nb):
+                n1 = rib_grid[(iz, iy)]
+                n2 = rib_grid[(iz + 1, iy)]
+                n3 = rib_grid[(iz + 1, iy + 1)]
+                n4 = rib_grid[(iz, iy + 1)]
+                elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
+                eid += 1
+                rib_elem_count += 1
+
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
         {"num": 1, "H": cfg.tw, "F": nu, "E": E, "Ro": rho},
@@ -293,6 +367,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     print(f"  Верх.стінка: {mirror_wall_count} ел.")
     print(f"  Верх.полиця: {mirror_flange_count} ел.")
     print(f"  X-дзеркало : {x_mirror_count} ел.")
+    print(f"  Серед.ребро: {rib_elem_count} ел.")
     print(f"  Всього ел. : {len(elements)}")
     print(f"  Файл       : {filepath}")
 
