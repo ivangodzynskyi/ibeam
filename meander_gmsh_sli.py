@@ -206,6 +206,41 @@ def generate(cfg: Config, mesh_size: float = 0.05,
                 eid += 1
                 flange_quad_count += 1
 
+    # ── Дзеркальна сітка відносно XOY (z → −z) ──────────────
+    #    верхня стінка (mat=3) + верхня полиця (mat=4)
+    #    Спільні вузли: z ≈ 0 (ті самі ID)
+    original_elements = list(elements)
+    mirror_map = {}  # old_nid → mirrored_nid
+    z_tol = 1e-6
+
+    for node in list(nodes):
+        if abs(node.z) < z_tol:
+            mirror_map[node.id] = node.id
+        else:
+            nid += 1
+            mirror_map[node.id] = nid
+            nodes.append(Node(nid, node.x, node.y, -node.z))
+
+    mirror_wall_count = 0
+    mirror_flange_count = 0
+    for elem in original_elements:
+        mn1 = mirror_map[elem.n1]
+        mn2 = mirror_map[elem.n2]
+        mn3 = mirror_map[elem.n3]
+        mn4 = mirror_map[elem.n4] if elem.n4 != 0 else 0
+
+        if elem.mat == 1:
+            mirror_wall_count += 1
+        elif elem.mat == 2:
+            mirror_flange_count += 1
+
+        # Реверс обходу для збереження напрямку нормалі
+        if mn4 == 0:  # трикутник
+            elements.append(Quad(eid, mn1, mn3, mn2, 0, mat=elem.mat))
+        else:  # чотирикутник
+            elements.append(Quad(eid, mn1, mn4, mn3, mn2, mat=elem.mat))
+        eid += 1
+
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
         {"num": 1, "H": cfg.tw, "F": nu, "E": E, "Ro": rho},
@@ -226,6 +261,8 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     print(f"  Стінка     : {quad_count + tri_count} "
           f"(quad={quad_count}, tri={tri_count})")
     print(f"  Полка      : {flange_quad_count} quad")
+    print(f"  Верх.стінка: {mirror_wall_count} ел.")
+    print(f"  Верх.полиця: {mirror_flange_count} ел.")
     print(f"  Всього ел. : {len(elements)}")
     print(f"  Файл       : {filepath}")
 
