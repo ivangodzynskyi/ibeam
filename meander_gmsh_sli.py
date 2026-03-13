@@ -95,8 +95,8 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     edge_line_tag = geo.addLine(p_br, p_bl)
     curves.append(edge_line_tag)
 
-    # → (0, 0) — замикання
-    p_start = add_pt(0, 0)
+    # → (0, -height) — замикання до початку меандру
+    p_start = add_pt(0, -cfg.height)
     curves.append(geo.addLine(p_bl, p_start))
 
     # ── Поверхня ─────────────────────────────────────────────

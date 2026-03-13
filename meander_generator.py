@@ -54,10 +54,10 @@ class MeanderGenerator:
             return []
 
         step = length / periods
-        points: List[Point] = [Point(0.0, 0.0)]
+        points: List[Point] = [Point(0.0, -height)]
 
         for i in range(periods):
-            y_level = 0.0 if i % 2 == 0 else -height
+            y_level = -height if i % 2 == 0 else 0.0
             x_end = round((i + 1) * step, 10)
 
             # Вертикальний перехід (якщо рівень змінився)
