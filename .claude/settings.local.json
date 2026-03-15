@@ -3,7 +3,21 @@
     "allow": [
       "Bash(python ibeam_sli_generator.py --L 6 --h1 0.5 --h2 0.5 --nx 2 --ny 4 --nw 4 --out output)",
       "Bash(PYTHONIOENCODING=utf-8 python ibeam_sli_generator.py --L 6 --h1 0.5 --h2 0.5 --nx 2 --ny 4 --nw 4 --out output)",
-      "Bash(PYTHONIOENCODING=utf-8 python ibeam_sli_generator.py --L 8 --h1 0.6 --h2 1.0 --nx 2 --ny 8 --nw 4 --q 1.0 --name test_load --out output)"
+      "Bash(PYTHONIOENCODING=utf-8 python ibeam_sli_generator.py --L 8 --h1 0.6 --h2 1.0 --nx 2 --ny 8 --nw 4 --q 1.0 --name test_load --out output)",
+      "Bash(python meander_generator.py)",
+      "Bash(ls C:/Dev/iBeamGenerator/*.py)",
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(python -c \"from fillet import compute_fillet; help\\(compute_fillet\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,''.''\\); from fillet import compute_fillet; help\\(compute_fillet\\)\")",
+      "Bash(python3 -c \"import sys; sys.path.insert\\(0,''.''\\); from fillet import compute_fillet; help\\(compute_fillet\\)\")",
+      "Bash(python -c \"import importlib.util, marshal, dis; spec = importlib.util.spec_from_file_location\\(''fillet'', ''__pycache__/fillet.cpython-314.pyc''\\); print\\(spec\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(PYTHONIOENCODING=utf-8 python -c \":*)",
+      "Bash(grep -E '\\\\.\\(py|sli\\)$')",
+      "Bash(grep -E '\\\\.\\(py|txt|md|sli|json\\)$')"
     ]
   }
 }
