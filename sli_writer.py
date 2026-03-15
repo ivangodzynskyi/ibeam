@@ -45,6 +45,38 @@ from typing import List, Tuple
 from ibeam_sli_generator import BeamParams, Node, Quad
 
 
+def _reorder_quad(e: Quad, nodes: List[Node]) -> Tuple[int, int, int, int]:
+    """Повертає (n1,n2,n3,n4) з правильним порядком обходу.
+
+    Для «майже горизонтальних» елементів (dz << dx і dz << dy)
+    порядок: (min x,min y) → (min x,max y) → (max x,max y) → (max x,min y).
+    Для решти — повертає як є.
+    """
+    nids = [e.n1, e.n2, e.n3, e.n4]
+    node_map = {n.id: n for n in nodes}
+    pts = [node_map[nid] for nid in nids]
+
+    xs = [p.x for p in pts]
+    ys = [p.y for p in pts]
+    zs = [p.z for p in pts]
+    dx = max(xs) - min(xs)
+    dy = max(ys) - min(ys)
+    dz = max(zs) - min(zs)
+
+    # «Майже горизонтальний»: dz значно менше за dx та dy
+    threshold = 0.3
+    if dz/dx < threshold and dz/dy < threshold:
+        # Сортуємо вузли у потрібний порядок
+        keyed = [(p.x, p.y, nid) for p, nid in zip(pts, nids)]
+        min_x_min_y = min(keyed, key=lambda t: ( t[0],  t[1]))
+        min_x_max_y = min(keyed, key=lambda t: ( t[0], -t[1]))
+        max_x_max_y = min(keyed, key=lambda t: (-t[0], -t[1]))
+        max_x_min_y = min(keyed, key=lambda t: (-t[0],  t[1]))
+        return min_x_min_y[2], min_x_max_y[2], max_x_max_y[2], max_x_min_y[2]
+
+    return e.n1, e.n2, e.n3, e.n4
+
+
 def _fmt(v: float) -> str:
     """Форматує число: без зайвих нулів, але з достатньою точністю."""
     if v == 0.0:
@@ -99,7 +131,8 @@ def write_sli(p: BeamParams,
     for e in elements:
         ln(f'    <Element Type="2" Material="{e.mat}">')
         if e.n4:
-            ln(f'      <Nodes Nd1="{e.n1}" Nd2="{e.n2}" Nd3="{e.n3}" Nd4="{e.n4}" />')
+            n1, n2, n3, n4 = _reorder_quad(e, nodes)
+            ln(f'      <Nodes Nd1="{n1}" Nd2="{n2}" Nd3="{n3}" Nd4="{n4}" />')
         else:
             ln(f'      <Nodes Nd1="{e.n1}" Nd2="{e.n2}" Nd3="{e.n3}" />')
         ln('    </Element>')
@@ -175,7 +208,8 @@ def write_plate_sli(title: str,
     for e in elements:
         ln(f'    <Element Type="2" Material="{e.mat}">')
         if e.n4:
-            ln(f'      <Nodes Nd1="{e.n1}" Nd2="{e.n2}" Nd3="{e.n3}" Nd4="{e.n4}" />')
+            n1, n2, n3, n4 = _reorder_quad(e, nodes)
+            ln(f'      <Nodes Nd1="{n1}" Nd2="{n2}" Nd3="{n3}" Nd4="{n4}" />')
         else:
             ln(f'      <Nodes Nd1="{e.n1}" Nd2="{e.n2}" Nd3="{e.n3}" />')
         ln('    </Element>')
