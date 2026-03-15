@@ -344,6 +344,26 @@ def generate(cfg: Config, mesh_size: float = 0.05,
                 eid += 1
                 rib_elem_count += 1
 
+    # ── В'язі (опори) ────────────────────────────────────────
+    restrictions = []
+    tol = 1e-6
+    for node in nodes:
+        # Ліва опора: x = -length, z = -h2 → закріплення X,Y,Z
+        if abs(node.x - (-cfg.length)) < tol and abs(node.z - (-cfg.h2)) < tol:
+            restrictions += [(node.id, 1), (node.id, 2), (node.id, 3)]
+        # Права опора: x = length, z = -h2 → закріплення Y,Z
+        elif abs(node.x - cfg.length) < tol and abs(node.z - (-cfg.h2)) < tol:
+            restrictions += [(node.id, 2), (node.id, 3)]
+
+    # ── Навантаження ──────────────────────────────────────────
+    #    Вертикальна сила -10 т у вузлі (0, h1, 0)
+    loads = []
+    target_z = cfg.h1
+    for node in nodes:
+        if abs(node.x) < tol and abs(node.y) < tol and abs(node.z - target_z) < tol:
+            loads.append((node.id, 3, -10.0, 1))
+            break
+
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
         {"num": 1, "H": cfg.tw, "F": nu, "E": E, "Ro": rho},
@@ -351,7 +371,8 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     ]
 
     filepath = output if output.endswith('.sli') else output + '.sli'
-    write_plate_sli(name, nodes, elements, materials, filepath)
+    write_plate_sli(name, nodes, elements, materials, filepath,
+                    restrictions=restrictions, loads=loads)
 
     print(f"\n{'=' * 60}")
     print(f"  Меандр: {name}")
@@ -368,6 +389,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     print(f"  Верх.полиця: {mirror_flange_count} ел.")
     print(f"  X-дзеркало : {x_mirror_count} ел.")
     print(f"  Серед.ребро: {rib_elem_count} ел.")
+    print(f"  В'язей     : {len(restrictions)}")
     print(f"  Всього ел. : {len(elements)}")
     print(f"  Файл       : {filepath}")
 

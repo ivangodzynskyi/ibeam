@@ -178,12 +178,20 @@ def write_plate_sli(title: str,
                     nodes: List[Node],
                     elements: List[Quad],
                     materials: List[dict],
-                    filepath: str):
-    """Записує модель плити у .sli (XML FE_Project) без навантажень.
+                    filepath: str,
+                    restrictions: List[Tuple[int, int]] = None,
+                    loads: List[Tuple[int, int, float, int]] = None):
+    """Записує модель плити у .sli (XML FE_Project).
 
     materials — список словників:
         [{"num": 1, "H": 0.01, "F": 0.28, "E": 2.02027e7, "Ro": 7850}, ...]
+    restrictions — список (node_id, dof): 1=X, 2=Y, 3=Z
+    loads — список (node_id, ndof, value, load_number)
     """
+    if restrictions is None:
+        restrictions = []
+    if loads is None:
+        loads = []
     lines = []
 
     def ln(s):
@@ -200,8 +208,11 @@ def write_plate_sli(title: str,
         ln(f'    <NodeCoords NdX="{_fmt(n.x)}" NdY="{_fmt(n.y)}" NdZ="{_fmt(n.z)}" />')
     ln('  </NodesCoordArray>')
 
-    # ── Без в'язей ──
-    ln('  <RestrictionsArray NumberOfElem="0" />')
+    # ── В'язі ──
+    ln(f'  <RestrictionsArray NumberOfElem="{len(restrictions)}">')
+    for nid, dof in restrictions:
+        ln(f'    <Restricts NdNum="{nid}" NDOF="{dof}" />')
+    ln('  </RestrictionsArray>')
 
     # ── Елементи (quad / triangle) ──
     ln(f'  <ElementsArray NumberOfElem="{len(elements)}">')
@@ -222,8 +233,12 @@ def write_plate_sli(title: str,
            f'F="{_fmt(m["F"])}" E="{_fmt(m["E"])}" Ro="{_fmt(m["Ro"])}" />')
     ln('  </MaterialsArray>')
 
-    # ── Без навантажень ──
-    ln('  <NodesLoadingArray NumberOfElem="0" />')
+    # ── Навантаження ──
+    ln(f'  <NodesLoadingArray NumberOfElem="{len(loads)}">')
+    for nid, ndof, val, lc in loads:
+        ln(f'    <NodesLoading NumNode="{nid}" NDOF="{ndof}" LoadType="0" '
+           f'LoadNumber="{lc}" LoadValue="{_fmt(val)}" LocalSys="0" />')
+    ln('  </NodesLoadingArray>')
 
     # ── Порожні блоки ──
     ln('  <ElemHingeArray NumberOfElem="0" />')
