@@ -62,6 +62,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
     # ── Будуємо криві меандру ─────────────────────────────────
     curves = []
+    arc_curves = []  # теги дуг для setTransfiniteCurve
     prev_pt_id = None
     center_pt_ids = set()  # точки-центри дуг (не включати в меш)
 
@@ -82,7 +83,9 @@ def generate(cfg: Config, mesh_size: float = 0.05,
                 curves.append(geo.addLine(prev_pt_id, p1_id))
 
             # Дуга філлету
-            curves.append(geo.addCircleArc(p1_id, pc_id, p2_id))
+            arc_tag = geo.addCircleArc(p1_id, pc_id, p2_id)
+            curves.append(arc_tag)
+            arc_curves.append(arc_tag)
             prev_pt_id = p2_id
 
     # ── Замикаючі лінії ──────────────────────────────────────
@@ -104,8 +107,17 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     geo.addPlaneSurface([loop])
     geo.synchronize()
 
+    # Подрібнення дуг: мінімум 6 вузлів на кожну дугу філлету
+    arc_num_nodes = 6
+    for arc_tag in arc_curves:
+        gmsh.model.geo.mesh.setTransfiniteCurve(arc_tag, arc_num_nodes)
+    geo.synchronize()
+
+    gmsh.option.setNumber("Mesh.Algorithm", 8)  # Frontal-Delaunay for Quads
+    gmsh.option.setNumber("Mesh.RecombineAll", 1)
+
     if use_quads:
-        gmsh.option.setNumber("Mesh.RecombineAll", 1)
+        gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)  # all quads
 
     gmsh.model.mesh.generate(2)
 
@@ -375,23 +387,23 @@ def generate(cfg: Config, mesh_size: float = 0.05,
                     restrictions=restrictions, loads=loads)
 
     print(f"\n{'=' * 60}")
-    print(f"  Меандр: {name}")
+    print(f"  Meander: {name}")
     print(f"{'=' * 60}")
     print(f"  length={cfg.length}, height={cfg.height}, "
           f"periods={cfg.periods}, radius={cfg.radius}")
     print(f"  h1={cfg.h1}, h2={cfg.h2}, bf={cfg.bf}, nb={cfg.nb}")
-    print(f"  Крок сітки : {mesh_size} м")
-    print(f"  Вузлів     : {len(nodes)}")
-    print(f"  Стінка     : {quad_count + tri_count} "
+    print(f"  Mesh size  : {mesh_size} m")
+    print(f"  Nodes      : {len(nodes)}")
+    print(f"  Wall       : {quad_count + tri_count} "
           f"(quad={quad_count}, tri={tri_count})")
-    print(f"  Полка      : {flange_quad_count} quad")
-    print(f"  Верх.стінка: {mirror_wall_count} ел.")
-    print(f"  Верх.полиця: {mirror_flange_count} ел.")
-    print(f"  X-дзеркало : {x_mirror_count} ел.")
-    print(f"  Серед.ребро: {rib_elem_count} ел.")
-    print(f"  В'язей     : {len(restrictions)}")
-    print(f"  Всього ел. : {len(elements)}")
-    print(f"  Файл       : {filepath}")
+    print(f"  Flange     : {flange_quad_count} quad")
+    print(f"  Top wall   : {mirror_wall_count} el.")
+    print(f"  Top flange : {mirror_flange_count} el.")
+    print(f"  X-mirror   : {x_mirror_count} el.")
+    print(f"  Mid rib    : {rib_elem_count} el.")
+    print(f"  Constraints: {len(restrictions)}")
+    print(f"  Total el.  : {len(elements)}")
+    print(f"  File       : {filepath}")
 
     return filepath
 

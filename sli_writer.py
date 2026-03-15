@@ -64,8 +64,8 @@ def _reorder_quad(e: Quad, nodes: List[Node]) -> Tuple[int, int, int, int]:
     dz = max(zs) - min(zs)
 
     # «Майже горизонтальний»: dz значно менше за dx та dy
-    threshold = 0.3
-    if dz/dx < threshold and dz/dy < threshold:
+    threshold = 0.5
+    if dx > 0 and dy > 0 and dz/dx < threshold and dz/dy < threshold:
         # Сортуємо вузли у потрібний порядок
         keyed = [(p.x, p.y, nid) for p, nid in zip(pts, nids)]
         min_x_min_y = min(keyed, key=lambda t: ( t[0],  t[1]))
