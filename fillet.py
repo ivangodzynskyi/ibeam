@@ -24,7 +24,7 @@ class FilletResult:
     RC: Point
 
 
-def compute_fillet(a: Coord, b: Coord, c: Coord, radius: float) -> FilletResult:
+def compute_fillet(a: Coord, b: Coord, c: Coord, radius: float) -> "FilletResult | None":
     """Обчислює скруглення для одного кута ABC.
 
     Args:
@@ -60,7 +60,7 @@ def compute_fillet(a: Coord, b: Coord, c: Coord, radius: float) -> FilletResult:
     half = angle / 2.0
 
     if abs(math.sin(half)) < 1e-12:
-        raise ValueError("Точки колінеарні — неможливо обчислити fillet.")
+        return None
 
     # Відстань від вершини до точки дотику
     d = radius / math.tan(half)

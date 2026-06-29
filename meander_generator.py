@@ -120,7 +120,10 @@ class MeanderGenerator:
 
         for i in range(1, len(points) - 1):
             fr = compute_fillet(points[i - 1], points[i], points[i + 1], radius=radius)
-            result.append(Fillet(p1=fr.R1, p2=fr.R2, p_center=fr.RC))
+            if fr is None:
+                result.append(points[i])
+            else:
+                result.append(Fillet(p1=fr.R1, p2=fr.R2, p_center=fr.RC))
 
         result.append(points[-1])
         return result
