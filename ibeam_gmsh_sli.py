@@ -58,6 +58,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
         length=cfg.length, height=cfg.height,
         periods=cfg.periods, radius=cfg.radius,
         k_angle=cfg.k_angle,
+        k_first=cfg.k_first,
     )
 
     # Остання точка меандру
