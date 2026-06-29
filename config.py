@@ -15,7 +15,7 @@ class Config:
     Tfill: float = 6            # товщина заповнюючих елементів, мм
     Bfill_center: float = 100   # довжина заповнюючого ребра посередині, мм
 
-    periods: int = 10           # кількість отворів (парна кількість)   
+    periods: int = 8           # кількість отворів (парна кількість)   
     toothZ: float = 60          # висота зубів, мм
     toothX: float = 20          # нахил зубів (проекція нахиленої частини зуба на поздовжню вісь), мм
     k_first: float = 3.0        # у скільки разів перший/останній сегмент довший за проміжні
@@ -39,3 +39,6 @@ class Config:
                                                 # нумерація від краю (x=length) до центру (x=0);
     to_add_fill_to_the_center: bool = True
     b_center: float = Bfill_center/2000         # X-розмір центральної вставки
+
+
+    # run ibeam_gmsh_sli.py to generate the i-beam with web-openings
