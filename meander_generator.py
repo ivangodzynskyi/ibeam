@@ -38,14 +38,16 @@ class MeanderGenerator:
 
     @staticmethod
     def generate(length: float, height: float, periods: int,
-                 k_angle: float = 0.0) -> List[Point]:
+                 k_angle: float = 0.0, k_first: float = 1.0) -> List[Point]:
         """Генерує точки прямокутного імпульсу.
 
         Args:
-            length:  довжина по координаті X.
-            height:  висота перепаду по Y (сигнал опускається на -height).
-            periods: кількість напівперіодів (сегментів).
-            k_angle: зсув по X для нахилу вертикальних переходів.
+            length:   довжина по координаті X.
+            height:   висота перепаду по Y (сигнал опускається на -height).
+            periods:  кількість напівперіодів (сегментів).
+            k_angle:  зсув по X для нахилу вертикальних переходів.
+            k_first:  у скільки разів перший і останній сегменти довші за
+                      проміжні. step = length / (periods + 2*(k_first-1)).
 
         Returns:
             Список точок (x, y), що описують меандр.
@@ -53,12 +55,19 @@ class MeanderGenerator:
         if periods <= 0:
             return []
 
-        step = length / periods
+        step = length / (periods + 2 * (k_first - 1))
+
+        x_ends: List[float] = []
+        x = 0.0
+        for i in range(periods):
+            x += step * k_first if (i == 0 or i == periods - 1) else step
+            x_ends.append(round(x, 10))
+
         points: List[Point] = [Point(0.0, -height)]
 
         for i in range(periods):
             y_level = -height if i % 2 == 0 else 0.0
-            x_end = round((i + 1) * step, 10)
+            x_end = x_ends[i]
 
             # Вертикальний перехід (якщо рівень змінився)
             if points[-1].y != y_level:
@@ -80,7 +89,8 @@ class MeanderGenerator:
     @staticmethod
     def generate_with_fillets(length: float, height: float, periods: int,
                               radius: float,
-                              k_angle: float = 0.0) -> List[Union[Point, Fillet]]:
+                              k_angle: float = 0.0,
+                              k_first: float = 1.0) -> List[Union[Point, Fillet]]:
         """Генерує меандр зі скругленнями у кутових точках.
 
         Кожна проміжна точка (кут) замінюється на об'єкт Fillet,
@@ -88,11 +98,13 @@ class MeanderGenerator:
         p1, p2 — точки дотику, p_center — центр кола.
 
         Args:
-            length:  довжина по координаті X.
-            height:  висота перепаду по Y.
-            periods: кількість напівперіодів.
-            radius:  радіус скруглення.
-            k_angle: зсув по X для нахилу вертикальних переходів.
+            length:   довжина по координаті X.
+            height:   висота перепаду по Y.
+            periods:  кількість напівперіодів.
+            radius:   радіус скруглення.
+            k_angle:  зсув по X для нахилу вертикальних переходів.
+            k_first:  у скільки разів перший і останній сегменти довші за
+                      проміжні (передається у generate()).
 
         Returns:
             Список, де перша та остання точки залишаються Point,
@@ -100,7 +112,7 @@ class MeanderGenerator:
         """
         from fillet import compute_fillet
 
-        points = MeanderGenerator.generate(length, height, periods, k_angle)
+        points = MeanderGenerator.generate(length, height, periods, k_angle, k_first)
         if len(points) < 3:
             return list(points)
 
@@ -123,5 +135,17 @@ if __name__ == "__main__":
 
     print("\nWith fillets (radius=0.2):")
     items = MeanderGenerator.generate_with_fillets(length=6, height=2, periods=6, radius=0.2)
+    for item in items:
+        print(f"  {item}")
+
+    print("\n--- k_first tests ---")
+    pts = MeanderGenerator.generate(length=8, height=2, periods=6, k_first=2.0)
+    print("k_first=2.0:             ", ", ".join(str(p) for p in pts))
+
+    pts = MeanderGenerator.generate(length=7, height=2, periods=6, k_angle=0.1, k_first=1.5)
+    print("k_first=1.5, k_angle=0.1:", ", ".join(str(p) for p in pts))
+
+    print("\nWith fillets (radius=0.2, k_first=2.0):")
+    items = MeanderGenerator.generate_with_fillets(length=8, height=2, periods=6, radius=0.2, k_first=2.0)
     for item in items:
         print(f"  {item}")
