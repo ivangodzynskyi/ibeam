@@ -38,7 +38,8 @@ class MeanderGenerator:
 
     @staticmethod
     def generate(length: float, height: float, periods: int,
-                 k_angle: float = 0.0, k_first: float = 1.0) -> List[Point]:
+                 k_angle: float = 0.0, k_first: float = 1.0,
+                 b_center: float = 0.0) -> List[Point]:
         """Генерує точки прямокутного імпульсу.
 
         Args:
@@ -64,6 +65,8 @@ class MeanderGenerator:
             x_ends.append(round(x, 10))
 
         points: List[Point] = [Point(0.0, -height)]
+        if b_center > 0.0:
+            points.append(Point(round(b_center, 10), -height))
 
         for i in range(periods):
             y_level = -height if i % 2 == 0 else 0.0
@@ -78,11 +81,18 @@ class MeanderGenerator:
 
         # Застосувати нахил до вертикальних переходів
         if k_angle != 0.0:
-            for i in range(1, len(points) - 1):
-                if i % 2 == 1:
-                    points[i].x -= k_angle
-                else:
-                    points[i].x += k_angle
+            if b_center > 0.0:
+                for i in range(2, len(points) - 1):
+                    if i % 2 == 1:
+                        points[i].x += k_angle
+                    else:
+                        points[i].x -= k_angle
+            else:
+                for i in range(1, len(points) - 1):
+                    if i % 2 == 1:
+                        points[i].x -= k_angle
+                    else:
+                        points[i].x += k_angle
 
         return points
 
@@ -90,7 +100,8 @@ class MeanderGenerator:
     def generate_with_fillets(length: float, height: float, periods: int,
                               radius: float,
                               k_angle: float = 0.0,
-                              k_first: float = 1.0) -> List[Union[Point, Fillet]]:
+                              k_first: float = 1.0,
+                              b_center: float = 0.0) -> List[Union[Point, Fillet]]:
         """Генерує меандр зі скругленнями у кутових точках.
 
         Кожна проміжна точка (кут) замінюється на об'єкт Fillet,
@@ -112,7 +123,7 @@ class MeanderGenerator:
         """
         from fillet import compute_fillet
 
-        points = MeanderGenerator.generate(length, height, periods, k_angle, k_first)
+        points = MeanderGenerator.generate(length, height, periods, k_angle, k_first, b_center)
         if len(points) < 3:
             return list(points)
 

@@ -60,7 +60,7 @@ def compute_fillet(a: Coord, b: Coord, c: Coord, radius: float) -> "FilletResult
     half = angle / 2.0
 
     if abs(math.sin(half)) < 1e-12:
-        return None
+        raise ValueError("Точки колінеарні — неможливо обчислити fillet.")
 
     # Відстань від вершини до точки дотику
     d = radius / math.tan(half)
@@ -71,6 +71,9 @@ def compute_fillet(a: Coord, b: Coord, c: Coord, radius: float) -> "FilletResult
     # Центр кола — на бісектрисі
     bisect_x, bisect_y = u1x + u2x, u1y + u2y
     bisect_len = math.hypot(bisect_x, bisect_y)
+    if bisect_len == 0:
+        return None
+    
     bisect_x, bisect_y = bisect_x / bisect_len, bisect_y / bisect_len
 
     dist_center = radius / math.sin(half)

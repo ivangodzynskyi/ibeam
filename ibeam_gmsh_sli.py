@@ -54,11 +54,14 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     )
 
     # ── Генеруємо криву меандру ───────────────────────────────
+    b_center = cfg.b_center if cfg.to_add_fill_to_the_center else 0.0
+
     items = MeanderGenerator.generate_with_fillets(
         length=cfg.length, height=cfg.height,
         periods=cfg.periods, radius=cfg.radius,
         k_angle=cfg.k_angle,
         k_first=cfg.k_first,
+        b_center=b_center,
     )
 
     # Остання точка меандру
@@ -294,6 +297,53 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
     gmsh.finalize()
 
+    # ── Центральна вставка (x ∈ [0, b_center], z ∈ [-height, 0]) ──
+    #    Структурована матриця: колонки — з вузлів меандру на z=-height,
+    #    рядки — рівномірний поділ по вертикалі.
+    center_fill_count = 0
+    if cfg.to_add_fill_to_the_center and b_center > 0:
+        cf_tol = 1e-6
+
+        bottom_row = sorted(
+            [n for n in nodes
+             if abs(n.z - (-cfg.height)) < cf_tol
+             and -cf_tol <= n.x <= b_center + cf_tol
+             and abs(n.y) < cf_tol],
+            key=lambda n: n.x,
+        )
+
+        n_rows = max(2, round(cfg.height / mesh_size))
+        dz = cfg.height / n_rows
+
+        fill_grid = {}
+        for col, base_node in enumerate(bottom_row):
+            fill_grid[(col, 0)] = base_node.id
+            for row in range(1, n_rows + 1):
+                z_val = round(-cfg.height + row * dz, 8)
+                existing = next(
+                    (n for n in nodes
+                     if abs(n.x - base_node.x) < cf_tol
+                     and abs(n.z - z_val) < cf_tol
+                     and abs(n.y) < cf_tol),
+                    None,
+                )
+                if existing:
+                    fill_grid[(col, row)] = existing.id
+                else:
+                    nid += 1
+                    nodes.append(Node(nid, base_node.x, 0.0, z_val))
+                    fill_grid[(col, row)] = nid
+
+        for col in range(len(bottom_row) - 1):
+            for row in range(n_rows):
+                n1 = fill_grid[(col,     row)]
+                n2 = fill_grid[(col + 1, row)]
+                n3 = fill_grid[(col + 1, row + 1)]
+                n4 = fill_grid[(col,     row + 1)]
+                elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
+                eid += 1
+                center_fill_count += 1
+
     # ── Полка: меш-сітка вздовж edgeLine (Y-direction) ─────────
     flange_quad_count = 0
     if cfg.nb > 0 and cfg.bf > 0:
@@ -515,6 +565,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
           f"(quad={quad_count}, tri={tri_count})")
     print(f"  Holes      : {total_holes} (filled={sorted(set(requested_holes))}, "
           f"t_fill={cfg.t_fill}, fill el.={fill_count} per quadrant)")
+    print(f"  Center fill: {center_fill_count} quad")
     print(f"  Flange     : {flange_quad_count} quad")
     print(f"  Top wall   : {mirror_wall_count} el.")
     print(f"  Top flange : {mirror_flange_count} el.")
