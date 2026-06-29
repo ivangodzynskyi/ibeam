@@ -10,9 +10,9 @@ class Config:
     radius: float = 0.01
     length: float = 1.0         #довжина півбалки
     height: float = 0.07
-    periods: int = 12
+    periods: int = 10
     k_angle: float = 0.01
-    k_first: float = 2.0       # у скільки разів перший/останній сегмент довший за проміжні
+    k_first: float = 3.0       # у скільки разів перший/останній сегмент довший за проміжні
     h1: float = 0.145
     h2: float = 0.085       
     bf: float = 0.12       # ширина полки (flange width, Y-direction)
