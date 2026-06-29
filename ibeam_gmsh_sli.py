@@ -27,11 +27,31 @@ from ibeam_sli_generator import Node, Quad
 from sli_writer import write_plate_sli
 
 
+def _parse_hole_numbers(val) -> List[int]:
+    """Розбирає fillHolesNumbers ("1,2,5" | [1,2,5] | "") у список int."""
+    if not val:
+        return []
+    if isinstance(val, (list, tuple)):
+        return [int(x) for x in val]
+    return [int(s) for s in str(val).split(',') if s.strip()]
+
+
 def generate(cfg: Config, mesh_size: float = 0.05,
              use_quads: bool = False,
              E: float = 2.02027e7, nu: float = 0.28, rho: float = 7850.0,
-             name: str = "meander", output: str = "meander.sli"):
-    """Будує меш контуру з меандром через gmsh, зберігає .sli."""
+             name: str = "meander", output: str = "meander.sli",
+             fill_holes=None):
+    """Будує меш контуру з меандром через gmsh, зберігає .sli.
+
+    fill_holes — номери отворів для заповнення (рядок "1,2,5" або список).
+    Якщо None — береться cfg.fillHolesNumbers. Нумерація йде від краю
+    півбалки (x=length) до центру (x=0); напівзападина біля x=0 — останній
+    (найбільший) номер.
+    """
+
+    requested_holes = _parse_hole_numbers(
+        fill_holes if fill_holes is not None else cfg.fillHolesNumbers
+    )
 
     # ── Генеруємо криву меандру ───────────────────────────────
     items = MeanderGenerator.generate_with_fillets(
@@ -66,11 +86,24 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     prev_pt_id = None
     center_pt_ids = set()  # точки-центри дуг (не включати в меш)
 
+    # Трекінг точок та кривих меандру (для побудови отворів).
+    # meander_pts[k] = (pt_id, x, z);  meander_curves[k] з'єднує точки k→k+1
+    meander_pts = []
+    meander_curves = []
+
+    def _track(pt_id, x, z):
+        meander_pts.append((pt_id, round(x, 10), round(z, 10)))
+
     for i, item in enumerate(items):
         if isinstance(item, Point):
             pt_id = add_pt(item.x, item.y)
-            if prev_pt_id is not None and prev_pt_id != pt_id:
-                curves.append(geo.addLine(prev_pt_id, pt_id))
+            if prev_pt_id is None:
+                _track(pt_id, item.x, item.y)          # перша точка меандру
+            elif prev_pt_id != pt_id:
+                c = geo.addLine(prev_pt_id, pt_id)
+                curves.append(c)
+                meander_curves.append(c)
+                _track(pt_id, item.x, item.y)
             prev_pt_id = pt_id
         elif isinstance(item, Fillet):
             p1_id = add_pt(item.p1.x, item.p1.y)
@@ -80,13 +113,65 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
             # Лінія від попередньої точки до початку дуги
             if prev_pt_id is not None and prev_pt_id != p1_id:
-                curves.append(geo.addLine(prev_pt_id, p1_id))
+                c = geo.addLine(prev_pt_id, p1_id)
+                curves.append(c)
+                meander_curves.append(c)
+                _track(p1_id, item.p1.x, item.p1.y)
 
             # Дуга філлету
             arc_tag = geo.addCircleArc(p1_id, pc_id, p2_id)
             curves.append(arc_tag)
             arc_curves.append(arc_tag)
+            meander_curves.append(arc_tag)
+            _track(p2_id, item.p2.x, item.p2.y)
             prev_pt_id = p2_id
+
+    # ── Визначаємо отвори (западини меандру) ──────────────────
+    #   Точки меандру на осі z=0 розділяють криву на плато (z=0) та
+    #   западини (занурення до z=-height). Кожна западина → отвір.
+    z0_tol = 1e-9
+    z0_idx = [k for k, (pid, x, z) in enumerate(meander_pts) if abs(z) < z0_tol]
+
+    valleys = []  # {curves, xmin, center, left_pt, right_pt}
+
+    # Центральна напівзападина: від початку меандру (0,-h) до 1-го z=0.
+    # Замикається лише після дзеркала по YOZ (вісь x=0).
+    if z0_idx and z0_idx[0] > 0:
+        f0 = z0_idx[0]
+        valleys.append({
+            'curves': meander_curves[0:f0],
+            'xmin': 0.0,
+            'center': True,
+            'left_pt': meander_pts[0],     # (0, -height) на осі x=0
+            'right_pt': meander_pts[f0],   # (~, 0)
+        })
+
+    # Повні западини: між сусідніми z=0 точками з проміжними точками z<0.
+    for a, b in zip(z0_idx[:-1], z0_idx[1:]):
+        if b - a >= 2:
+            xs = [meander_pts[k][1] for k in range(a, b + 1)]
+            valleys.append({
+                'curves': meander_curves[a:b],
+                'xmin': min(xs),
+                'center': False,
+                'left_pt': meander_pts[a],
+                'right_pt': meander_pts[b],
+            })
+
+    # Нумерація від краю (x=length) до центру: більший x → менший номер.
+    valleys.sort(key=lambda v: v['xmin'], reverse=True)
+    total_holes = len(valleys)
+
+    # ── Валідація запитаних номерів отворів ───────────────────
+    if requested_holes:
+        bad = [n for n in requested_holes if n < 1 or n > total_holes]
+        if bad:
+            gmsh.finalize()
+            raise ValueError(
+                f"Запитано отвори {sorted(set(requested_holes))}, але півбалка "
+                f"має лише {total_holes} отвір(ів). Недопустимі номери: "
+                f"{sorted(set(bad))}. Збільште periods у конфізі."
+            )
 
     # ── Замикаючі лінії ──────────────────────────────────────
     # Кінець меандру → (length, -height - h2)
@@ -102,9 +187,30 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     p_start = add_pt(0, -cfg.height)
     curves.append(geo.addLine(p_bl, p_start))
 
-    # ── Поверхня ─────────────────────────────────────────────
-    loop = geo.addCurveLoop(curves)
-    geo.addPlaneSurface([loop])
+    # ── Поверхня стінки ──────────────────────────────────────
+    wall_loop = geo.addCurveLoop(curves)
+    wall_surface = geo.addPlaneSurface([wall_loop])
+
+    # ── Поверхні-заповнення отворів (нижня половина, до z=0) ──
+    #   Кожен отвір замикається швом по z=0; центральний — ще й
+    #   лінією по осі x=0. Спільні криві з меандром → конформна сітка.
+    hole_surfaces = []
+    p00_id = None  # точка (0,0) на перетині осей симетрії
+    for num in sorted(set(requested_holes)):
+        v = valleys[num - 1]
+        loop_curves = list(v['curves'])          # left_pt →...→ right_pt
+        rp_id = v['right_pt'][0]
+        lp_id = v['left_pt'][0]
+        if v['center']:
+            if p00_id is None:
+                p00_id = add_pt(0.0, 0.0)
+            loop_curves += [geo.addLine(rp_id, p00_id),   # шов z=0
+                            geo.addLine(p00_id, lp_id)]    # вісь x=0
+        else:
+            loop_curves += [geo.addLine(rp_id, lp_id)]     # шов z=0
+        hloop = geo.addCurveLoop(loop_curves)
+        hole_surfaces.append(geo.addPlaneSurface([hloop]))
+
     geo.synchronize()
 
     # Подрібнення дуг: мінімум 6 вузлів на кожну дугу філлету
@@ -147,34 +253,43 @@ def generate(cfg: Config, mesh_size: float = 0.05,
         z = round(coords[3 * i + 2], 8)
         nodes.append(Node(nid, x, y, z))
 
-    # ── Витягуємо елементи (dim=2) ───────────────────────────
-    elem_types, elem_tags_list, elem_node_tags_list = \
-        gmsh.model.mesh.getElements(dim=2)
-
+    # ── Витягуємо елементи (dim=2) по поверхнях ───────────────
+    #   Стінка → mat=1, заповнення отворів → mat=3.
     elements: List[Quad] = []
     eid = 1
     tri_count = 0
     quad_count = 0
+    fill_count = 0
 
-    for et, tags, ntags in zip(elem_types, elem_tags_list,
-                               elem_node_tags_list):
-        if et == 2:  # 3-node triangle
-            for i in range(len(tags)):
-                n1 = tag_to_id[int(ntags[i * 3])]
-                n2 = tag_to_id[int(ntags[i * 3 + 1])]
-                n3 = tag_to_id[int(ntags[i * 3 + 2])]
-                elements.append(Quad(eid, n1, n2, n3, 0, mat=1))
-                eid += 1
-                tri_count += 1
-        elif et == 3:  # 4-node quad
-            for i in range(len(tags)):
-                n1 = tag_to_id[int(ntags[i * 4])]
-                n2 = tag_to_id[int(ntags[i * 4 + 1])]
-                n3 = tag_to_id[int(ntags[i * 4 + 2])]
-                n4 = tag_to_id[int(ntags[i * 4 + 3])]
-                elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
-                eid += 1
-                quad_count += 1
+    surface_mat = [(wall_surface, 1)] + [(hs, 3) for hs in hole_surfaces]
+    for stag, mat in surface_mat:
+        elem_types, elem_tags_list, elem_node_tags_list = \
+            gmsh.model.mesh.getElements(dim=2, tag=stag)
+        for et, tags, ntags in zip(elem_types, elem_tags_list,
+                                   elem_node_tags_list):
+            if et == 2:  # 3-node triangle
+                for i in range(len(tags)):
+                    n1 = tag_to_id[int(ntags[i * 3])]
+                    n2 = tag_to_id[int(ntags[i * 3 + 1])]
+                    n3 = tag_to_id[int(ntags[i * 3 + 2])]
+                    elements.append(Quad(eid, n1, n2, n3, 0, mat=mat))
+                    eid += 1
+                    if mat == 1:
+                        tri_count += 1
+                    else:
+                        fill_count += 1
+            elif et == 3:  # 4-node quad
+                for i in range(len(tags)):
+                    n1 = tag_to_id[int(ntags[i * 4])]
+                    n2 = tag_to_id[int(ntags[i * 4 + 1])]
+                    n3 = tag_to_id[int(ntags[i * 4 + 2])]
+                    n4 = tag_to_id[int(ntags[i * 4 + 3])]
+                    elements.append(Quad(eid, n1, n2, n3, n4, mat=mat))
+                    eid += 1
+                    if mat == 1:
+                        quad_count += 1
+                    else:
+                        fill_count += 1
 
     gmsh.finalize()
 
@@ -380,6 +495,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     materials = [
         {"num": 1, "H": cfg.tw, "F": nu, "E": E, "Ro": rho},
         {"num": 2, "H": cfg.tb, "F": nu, "E": E, "Ro": rho},
+        {"num": 3, "H": cfg.t_fill, "F": nu, "E": E, "Ro": rho},
     ]
 
     filepath = output if output.endswith('.sli') else output + '.sli'
@@ -396,6 +512,8 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     print(f"  Nodes      : {len(nodes)}")
     print(f"  Wall       : {quad_count + tri_count} "
           f"(quad={quad_count}, tri={tri_count})")
+    print(f"  Holes      : {total_holes} (filled={sorted(set(requested_holes))}, "
+          f"t_fill={cfg.t_fill}, fill el.={fill_count} per quadrant)")
     print(f"  Flange     : {flange_quad_count} quad")
     print(f"  Top wall   : {mirror_wall_count} el.")
     print(f"  Top flange : {mirror_flange_count} el.")
@@ -420,8 +538,15 @@ if __name__ == "__main__":
                         help="Назва моделі (default: meander)")
     parser.add_argument("--output", type=str, default="meander.sli",
                         help="Вихідний файл (default: meander.sli)")
+    parser.add_argument("--fill-holes", type=str, default=None,
+                        help="Номери отворів для заповнення, напр. 1,2,5 "
+                             "(нумерація від краю до центру)")
+    parser.add_argument("--t-fill", type=float, default=None,
+                        help="Товщина сітки-заповнення отворів, м")
 
     args = parser.parse_args()
     cfg = Config()
+    if args.t_fill is not None:
+        cfg.t_fill = args.t_fill
     generate(cfg, mesh_size=args.mesh_size, use_quads=args.quads,
-             name=args.name, output=args.output)
+             name=args.name, output=args.output, fill_holes=args.fill_holes)
