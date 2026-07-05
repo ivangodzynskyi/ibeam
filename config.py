@@ -42,3 +42,4 @@ class Config:
 
 
     # run ibeam_gmsh_sli.py to generate the i-beam with web-openings
+    # run plain_ibeam_sli.py to generate the plain simply-supported i-beam
