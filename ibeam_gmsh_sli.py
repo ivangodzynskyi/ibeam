@@ -496,11 +496,12 @@ def generate(cfg: Config, mesh_size: float = 0.05,
                 rib_lookup[key] = node.id
 
         # 4. Побудувати сітку rib_grid[(iz, iy)] → node_id
+        #    y ∈ [-bf/2, bf/2], симетрично обидві сторони
         dy = cfg.bf / (2 * cfg.nb)
         rib_grid = {}
 
         for iz, zv in enumerate(z_vals):
-            for iy in range(cfg.nb + 1):
+            for iy in range(-cfg.nb, cfg.nb + 1):
                 y_val = round(iy * dy, 8)
                 key = (round(y_val, 6), round(zv, 6))
                 if key in rib_lookup:
@@ -513,7 +514,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
 
         # 5. Прямокутні елементи ребра
         for iz in range(len(z_vals) - 1):
-            for iy in range(cfg.nb):
+            for iy in range(-cfg.nb, cfg.nb):
                 n1 = rib_grid[(iz, iy)]
                 n2 = rib_grid[(iz + 1, iy)]
                 n3 = rib_grid[(iz + 1, iy + 1)]
@@ -522,7 +523,69 @@ def generate(cfg: Config, mesh_size: float = 0.05,
                 eid += 1
                 rib_elem_count += 1
 
-    # ── В'язі (опори) ────────────────────────────────────────
+    # ── Опорні ребра жорсткості (x=±length, площина паралельна YOZ) ─
+    #    Прямокутник: y ∈ [-bf/2, bf/2], z ∈ [-h2, h2]
+    #    Спільні вузли з існуючими сітками при x ≈ ±length
+    support_rib_elem_count = 0
+    if cfg.nb > 0 and cfg.bf > 0 and cfg.h2 > 0:
+        support_x_tol = 1e-6
+        support_y_tol = 1e-6
+
+        dy = cfg.bf / (2 * cfg.nb)
+        z_min = -cfg.h2
+        z_max = cfg.h2
+
+        # Обробити обидва опорні ребра: x=length та x=-length
+        for support_x in [cfg.length, -cfg.length]:
+            # 1. Зібрати всі z-значення вузлів на лінії x=±length, y=0
+            #    в діапазоні z ∈ [-h2/2, h2/2]
+            z_support_axis = {}  # round(z,8) → node_id
+            for node in nodes:
+                if (abs(node.x - support_x) < support_x_tol and
+                    abs(node.y) < support_y_tol and
+                    z_min - support_x_tol <= node.z <= z_max + support_x_tol):
+                    zk = round(node.z, 8)
+                    if zk not in z_support_axis:
+                        z_support_axis[zk] = node.id
+
+            z_support_vals = sorted(z_support_axis.keys())
+
+            # 3. Побудувати lookup для існуючих вузлів при x ≈ ±length
+            support_lookup = {}  # (y_round, z_round) → node_id
+            for node in nodes:
+                if (abs(node.x - support_x) < support_x_tol and
+                    z_min - support_y_tol <= node.z <= z_max + support_y_tol):
+                    key = (round(node.y, 6), round(node.z, 6))
+                    support_lookup[key] = node.id
+
+            # 4. Побудувати сітку support_grid[(iz, iy)] → node_id
+            #    y ∈ [-bf/2, bf/2], z ∈ [-h2, h2], симетрично по Y
+            support_grid = {}
+
+            for iz, zv in enumerate(z_support_vals):
+                for iy in range(-cfg.nb, cfg.nb + 1):
+                    y_val = round(iy * dy, 8)
+                    key = (round(y_val, 6), round(zv, 6))
+                    if key in support_lookup:
+                        support_grid[(iz, iy)] = support_lookup[key]
+                    else:
+                        nid += 1
+                        nodes.append(Node(nid, support_x, y_val, zv))
+                        support_lookup[key] = nid
+                        support_grid[(iz, iy)] = nid
+
+            # 5. Прямокутні елементи опорного ребра
+            for iz in range(len(z_support_vals) - 1):
+                for iy in range(-cfg.nb, cfg.nb):
+                    n1 = support_grid[(iz, iy)]
+                    n2 = support_grid[(iz + 1, iy)]
+                    n3 = support_grid[(iz + 1, iy + 1)]
+                    n4 = support_grid[(iz, iy + 1)]
+                    elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
+                    eid += 1
+                    support_rib_elem_count += 1
+
+    # ── В'язи (опори) ────────────────────────────────────────
     restrictions = []
     tol = 1e-6
     for node in nodes:
@@ -571,6 +634,7 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     print(f"  Top flange : {mirror_flange_count} el.")
     print(f"  X-mirror   : {x_mirror_count} el.")
     print(f"  Mid rib    : {rib_elem_count} el.")
+    print(f"  Support ribs: {support_rib_elem_count} el.")
     print(f"  Constraints: {len(restrictions)}")
     print(f"  Total el.  : {len(elements)}")
     print(f"  File       : {filepath}")
