@@ -36,7 +36,7 @@ def _parse_hole_numbers(val) -> List[int]:
     return [int(s) for s in str(val).split(',') if s.strip()]
 
 
-def generate(cfg: Config, mesh_size: float = 0.05,
+def generate(cfg: Config, mesh_size: float = 0.02,
              use_quads: bool = False,
              E: float = 2.02027e7, nu: float = 0.28, rho: float = 7850.0,
              name: str = "meander", output: str = "meander.sli",
@@ -218,13 +218,33 @@ def generate(cfg: Config, mesh_size: float = 0.05,
     geo.synchronize()
 
     # Подрібнення дуг: мінімум 6 вузлів на кожну дугу філлету
-    arc_num_nodes = 6
+    arc_num_nodes = 8
     for arc_tag in arc_curves:
         gmsh.model.geo.mesh.setTransfiniteCurve(arc_tag, arc_num_nodes)
     geo.synchronize()
 
+    # ── Локальне подрібнення сітки біля філлетів ──────────────
+    # Створюємо поле відстані від дуг (филлетів)
+    if arc_curves:
+        fillet_fine_size = mesh_size * 0.4  # Мінімальний розмір біля філлету
+        fillet_transition_dist = mesh_size * 4  # Відстань переходу розміру
+
+        dist_field_tag = gmsh.model.mesh.field.add("Distance")
+        gmsh.model.mesh.field.setNumbers(dist_field_tag, "CurvesList", arc_curves)
+        gmsh.model.mesh.field.setNumber(dist_field_tag, "Sampling", 100)
+
+        # Плавний перехід від дрібної сітки біля филлету до більш грубої
+        size_field_tag = gmsh.model.mesh.field.add("Threshold")
+        gmsh.model.mesh.field.setNumber(size_field_tag, "InField", dist_field_tag)
+        gmsh.model.mesh.field.setNumber(size_field_tag, "SizeMin", fillet_fine_size)
+        gmsh.model.mesh.field.setNumber(size_field_tag, "SizeMax", mesh_size)
+        gmsh.model.mesh.field.setNumber(size_field_tag, "DistMin", 0)
+        gmsh.model.mesh.field.setNumber(size_field_tag, "DistMax", fillet_transition_dist)
+
+        gmsh.model.mesh.field.setAsBackgroundMesh(size_field_tag)
+
     gmsh.option.setNumber("Mesh.Algorithm", 8)  # Frontal-Delaunay for Quads
-    gmsh.option.setNumber("Mesh.RecombineAll", 1)
+    #gmsh.option.setNumber("Mesh.RecombineAll", 1)
 
     if use_quads:
         gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)  # all quads
@@ -646,8 +666,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Генератор меш-сітки меандру (gmsh) → ЛІРА САПР .sli"
     )
-    parser.add_argument("--mesh-size", type=float, default=0.05,
-                        help="Розмір елемента, м (default: 0.05)")
+    parser.add_argument("--mesh-size", type=float, default=0.02,
+                        help="Розмір елемента, м (default: 0.02)")
     parser.add_argument("--quads", action="store_true",
                         help="Рекомбінувати трикутники в квади")
     parser.add_argument("--name", type=str, default="meander",
