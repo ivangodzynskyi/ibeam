@@ -38,7 +38,7 @@ def _parse_hole_numbers(val) -> List[int]:
 
 def generate(cfg: Config, mesh_size: float = 0.02,
              use_quads: bool = False,
-             E: float = 2.02027e7, nu: float = 0.28, rho: float = 7850.0,
+             E: float = 2.02027e7, nu: float = 0.28, rho: float = 7.850,
              name: str = "meander", output: str = "meander.sli",
              fill_holes=None):
     """Будує меш контуру з меандром через gmsh, зберігає .sli.
@@ -218,30 +218,10 @@ def generate(cfg: Config, mesh_size: float = 0.02,
     geo.synchronize()
 
     # Подрібнення дуг: мінімум 6 вузлів на кожну дугу філлету
-    arc_num_nodes = 8
+    arc_num_nodes = 6
     for arc_tag in arc_curves:
         gmsh.model.geo.mesh.setTransfiniteCurve(arc_tag, arc_num_nodes)
     geo.synchronize()
-
-    # ── Локальне подрібнення сітки біля філлетів ──────────────
-    # Створюємо поле відстані від дуг (филлетів)
-    if arc_curves:
-        fillet_fine_size = mesh_size * 0.4  # Мінімальний розмір біля філлету
-        fillet_transition_dist = mesh_size * 4  # Відстань переходу розміру
-
-        dist_field_tag = gmsh.model.mesh.field.add("Distance")
-        gmsh.model.mesh.field.setNumbers(dist_field_tag, "CurvesList", arc_curves)
-        gmsh.model.mesh.field.setNumber(dist_field_tag, "Sampling", 100)
-
-        # Плавний перехід від дрібної сітки біля филлету до більш грубої
-        size_field_tag = gmsh.model.mesh.field.add("Threshold")
-        gmsh.model.mesh.field.setNumber(size_field_tag, "InField", dist_field_tag)
-        gmsh.model.mesh.field.setNumber(size_field_tag, "SizeMin", fillet_fine_size)
-        gmsh.model.mesh.field.setNumber(size_field_tag, "SizeMax", mesh_size)
-        gmsh.model.mesh.field.setNumber(size_field_tag, "DistMin", 0)
-        gmsh.model.mesh.field.setNumber(size_field_tag, "DistMax", fillet_transition_dist)
-
-        gmsh.model.mesh.field.setAsBackgroundMesh(size_field_tag)
 
     gmsh.option.setNumber("Mesh.Algorithm", 8)  # Frontal-Delaunay for Quads
     #gmsh.option.setNumber("Mesh.RecombineAll", 1)
@@ -617,13 +597,53 @@ def generate(cfg: Config, mesh_size: float = 0.02,
             restrictions += [(node.id, 2), (node.id, 3)]
 
     # ── Навантаження ──────────────────────────────────────────
-    #    Вертикальна сила -10 т у вузлі (0, h1, 0)
+    #    Замість концентрованої сили -10 т у вузлі (0, 0, h1),
+    #    розподілити її по 4 сусідніх горизонтальних елементам верхньої полиці
     loads = []
+    distributed_loads = []  # (elem_id, load_value_per_m2)
+
+    # Знайти вузол (0, 0, h1)
+    target_node_id = None
     target_z = cfg.h1
     for node in nodes:
         if abs(node.x) < tol and abs(node.y) < tol and abs(node.z - target_z) < tol:
-            loads.append((node.id, 3, -10.0, 1))
+            target_node_id = node.id
             break
+
+    if target_node_id is not None:
+        # Знайти всі елементи, що містять цей вузол (матеріал 2 = верхня полиця)
+        adjacent_elements = []
+        for elem in elements:
+            if elem.mat == 2:  # верхня полиця
+                elem_nodes = [elem.n1, elem.n2, elem.n3]
+                if elem.n4 != 0:
+                    elem_nodes.append(elem.n4)
+                if target_node_id in elem_nodes:
+                    adjacent_elements.append(elem)
+
+        # Обчислити площу елементів
+        node_map = {n.id: n for n in nodes}
+        total_area = 0.0
+        for elem in adjacent_elements:
+            elem_nodes_list = [elem.n1, elem.n2, elem.n3]
+            if elem.n4 != 0:
+                elem_nodes_list.append(elem.n4)
+
+            # Отримати координати вузлів
+            node_coords = [node_map[nid] for nid in elem_nodes_list]
+
+            # Обчислити площу як добуток розмірів по X та Y
+            xs = [n.x for n in node_coords]
+            ys = [n.y for n in node_coords]
+            dx = max(xs) - min(xs)
+            dy = max(ys) - min(ys)
+            area = dx * dy
+            total_area += area
+
+        # Розділити силу на площу (отримати т/м²)
+        if total_area > 0:
+            load_per_area = -10.0 / total_area  # т/м²
+            distributed_loads = [(elem.id, load_per_area) for elem in adjacent_elements]
 
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
@@ -634,7 +654,8 @@ def generate(cfg: Config, mesh_size: float = 0.02,
 
     filepath = output if output.endswith('.sli') else output + '.sli'
     write_plate_sli(name, nodes, elements, materials, filepath,
-                    restrictions=restrictions, loads=loads)
+                    restrictions=restrictions, loads=loads,
+                    distributed_loads=distributed_loads)
 
     print(f"\n{'=' * 60}")
     print(f"  Meander: {name}")
@@ -666,8 +687,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Генератор меш-сітки меандру (gmsh) → ЛІРА САПР .sli"
     )
-    parser.add_argument("--mesh-size", type=float, default=0.02,
-                        help="Розмір елемента, м (default: 0.02)")
+    parser.add_argument("--mesh-size", type=float, default=0.01,
+                        help="Розмір елемента, м (default: 0.01)")
     parser.add_argument("--quads", action="store_true",
                         help="Рекомбінувати трикутники в квади")
     parser.add_argument("--name", type=str, default="meander",

@@ -180,18 +180,22 @@ def write_plate_sli(title: str,
                     materials: List[dict],
                     filepath: str,
                     restrictions: List[Tuple[int, int]] = None,
-                    loads: List[Tuple[int, int, float, int]] = None):
+                    loads: List[Tuple[int, int, float, int]] = None,
+                    distributed_loads: List[Tuple[int, float]] = None):
     """Записує модель плити у .sli (XML FE_Project).
 
     materials — список словників:
-        [{"num": 1, "H": 0.01, "F": 0.28, "E": 2.02027e7, "Ro": 7850}, ...]
+        [{"num": 1, "H": 0.01, "F": 0.28, "E": 2.02027e7, "Ro": 7.85}, ...]
     restrictions — список (node_id, dof): 1=X, 2=Y, 3=Z
     loads — список (node_id, ndof, value, load_number)
+    distributed_loads — список (elem_id, load_value_per_m2)
     """
     if restrictions is None:
         restrictions = []
     if loads is None:
         loads = []
+    if distributed_loads is None:
+        distributed_loads = []
     lines = []
 
     def ln(s):
@@ -240,11 +244,17 @@ def write_plate_sli(title: str,
            f'LoadNumber="{lc}" LoadValue="{_fmt(val)}" LocalSys="0" />')
     ln('  </NodesLoadingArray>')
 
+    # ── Розподілене навантаження на елементи ──
+    ln(f'  <ElemLoadingArray NumberOfElem="{len(distributed_loads)}">')
+    for elem_id, load_per_m2 in distributed_loads:
+        ln(f'    <ElemLoading NumElem="{elem_id}" LoadNumber="1" LoadType="3" '
+           f'LocalSys="0" NDOF="3" PMx="{_fmt(load_per_m2)}" />')
+    ln('  </ElemLoadingArray>')
+
     # ── Порожні блоки ──
     ln('  <ElemHingeArray NumberOfElem="0" />')
     ln('  <NodeHingeArray NumberOfElem="0" />')
     ln('  <EccentricityArray NumberOfElem="0" />')
-    ln('  <ElemLoadingArray NumberOfElem="0" />')
     ln('</FE_Project>')
 
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
