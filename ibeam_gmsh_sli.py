@@ -36,6 +36,43 @@ def _parse_hole_numbers(val) -> List[int]:
     return [int(s) for s in str(val).split(',') if s.strip()]
 
 
+def _get_arc_num_nodes(fillet, target_step: float = 0.001, min_nodes: int = 6) -> int:
+    """Розрахунок кількості вузлів для дуги філлету на основі цільового кроку.
+
+    Args:
+        fillet: об'єкт Fillet з точками p1, p2, p_center
+        target_step: цільовий крок розбивки, м (default: 0.001)
+        min_nodes: мінімальна кількість вузлів (default: 6)
+
+    Returns:
+        Кількість вузлів для встановлення через setTransfiniteCurve
+    """
+    # Вектори від центру до кінців дуги
+    v1_x = fillet.p1.x - fillet.p_center.x
+    v1_y = fillet.p1.y - fillet.p_center.y
+    v2_x = fillet.p2.x - fillet.p_center.x
+    v2_y = fillet.p2.y - fillet.p_center.y
+
+    # Радіус дуги
+    radius = math.sqrt(v1_x**2 + v1_y**2)
+    if radius < 1e-10:
+        return min_nodes
+
+    # Центральний кут між векторами
+    dot = v1_x * v2_x + v1_y * v2_y
+    cos_angle = dot / (radius * radius)
+    cos_angle = max(-1.0, min(1.0, cos_angle))  # Числова стійкість
+    angle = math.acos(cos_angle)
+
+    # Довжина дуги
+    arc_length = radius * angle
+
+    # Кількість вузлів для досягнення цільового кроку
+    num_nodes = max(min_nodes, round(arc_length / target_step) + 1)
+
+    return num_nodes
+
+
 def generate(cfg: Config, mesh_size: float = 0.02,
              use_quads: bool = False,
              E: float = 2.02027e7, nu: float = 0.28, rho: float = 7.850,
@@ -86,7 +123,7 @@ def generate(cfg: Config, mesh_size: float = 0.02,
 
     # ── Будуємо криві меандру ─────────────────────────────────
     curves = []
-    arc_curves = []  # теги дуг для setTransfiniteCurve
+    arc_curves_with_nodes = []  # список (arc_tag, num_nodes) для setTransfiniteCurve
     prev_pt_id = None
     center_pt_ids = set()  # точки-центри дуг (не включати в меш)
 
@@ -122,10 +159,11 @@ def generate(cfg: Config, mesh_size: float = 0.02,
                 meander_curves.append(c)
                 _track(p1_id, item.p1.x, item.p1.y)
 
-            # Дуга філлету
+            # Дуга філлету з розрахованою кількістю вузлів для кроку 0.001
             arc_tag = geo.addCircleArc(p1_id, pc_id, p2_id)
             curves.append(arc_tag)
-            arc_curves.append(arc_tag)
+            num_nodes = _get_arc_num_nodes(item, target_step=0.001, min_nodes=6)
+            arc_curves_with_nodes.append((arc_tag, num_nodes))
             meander_curves.append(arc_tag)
             _track(p2_id, item.p2.x, item.p2.y)
             prev_pt_id = p2_id
@@ -217,10 +255,10 @@ def generate(cfg: Config, mesh_size: float = 0.02,
 
     geo.synchronize()
 
-    # Подрібнення дуг: мінімум 6 вузлів на кожну дугу філлету
-    arc_num_nodes = 6
-    for arc_tag in arc_curves:
-        gmsh.model.geo.mesh.setTransfiniteCurve(arc_tag, arc_num_nodes)
+    # Подрібнення дуг філлетів: динамічна кількість вузлів на основі довжини дуги
+    # для досягнення цільового кроку 0.001 м
+    for arc_tag, num_nodes in arc_curves_with_nodes:
+        gmsh.model.geo.mesh.setTransfiniteCurve(arc_tag, num_nodes)
     geo.synchronize()
 
     gmsh.option.setNumber("Mesh.Algorithm", 8)  # Frontal-Delaunay for Quads
