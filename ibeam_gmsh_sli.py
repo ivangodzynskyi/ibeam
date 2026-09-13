@@ -642,7 +642,7 @@ def generate(cfg: Config, mesh_size: float = 0.02,
 
         # Розділити силу на площу (отримати т/м²)
         if total_area > 0:
-            load_per_area = -10.0 / total_area  # т/м²
+            load_per_area = -100.0 / total_area  # т/м²
             distributed_loads = [(elem.id, load_per_area) for elem in adjacent_elements]
 
     # ── Записуємо .sli ───────────────────────────────────────

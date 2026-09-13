@@ -208,12 +208,51 @@ def generate(cfg: Config,
             restrictions += [(node.id, 2), (node.id, 3)]
 
     # ── Навантаження ──────────────────────────────────────────
-    #    Вертикальна сила -10 кН у вузлі (0, 0, zf)
+    #    Розподілити силу -10 кН по 4 прилеглим елементам верхнього поясу
     loads = []
+    distributed_loads = []  # (elem_id, load_value_per_m2)
+
+    # Знайти вузол (0, 0, zf)
+    target_node_id = None
     for node in nodes:
         if abs(node.x) < tol and abs(node.y) < tol and abs(node.z - zf) < tol:
-            loads.append((node.id, 3, -10.0, 1))
+            target_node_id = node.id
             break
+
+    if target_node_id is not None:
+        # Знайти всі елементи, що містять цей вузол (матеріал 2 = верхній поясу)
+        adjacent_elements = []
+        for elem in elements:
+            if elem.mat == 2:  # верхній пояс
+                elem_nodes = [elem.n1, elem.n2, elem.n3]
+                if elem.n4 != 0:
+                    elem_nodes.append(elem.n4)
+                if target_node_id in elem_nodes:
+                    adjacent_elements.append(elem)
+
+        # Обчислити площу елементів
+        node_map = {n.id: n for n in nodes}
+        total_area = 0.0
+        for elem in adjacent_elements:
+            elem_nodes_list = [elem.n1, elem.n2, elem.n3]
+            if elem.n4 != 0:
+                elem_nodes_list.append(elem.n4)
+
+            # Отримати координати вузлів
+            node_coords = [node_map[nid] for nid in elem_nodes_list]
+
+            # Обчислити площу як добуток розмірів по X та Y
+            xs = [n.x for n in node_coords]
+            ys = [n.y for n in node_coords]
+            dx = max(xs) - min(xs)
+            dy = max(ys) - min(ys)
+            area = dx * dy
+            total_area += area
+
+        # Розділити силу на площу (отримати кН/м²)
+        if total_area > 0:
+            load_per_area = -100.0 / total_area  # кН/м²
+            distributed_loads = [(elem.id, load_per_area) for elem in adjacent_elements]
 
     # ── Записуємо .sli ───────────────────────────────────────
     materials = [
@@ -223,7 +262,8 @@ def generate(cfg: Config,
 
     filepath = output if output.endswith('.sli') else output + '.sli'
     write_plate_sli(name, nodes, elements, materials, filepath,
-                    restrictions=restrictions, loads=loads)
+                    restrictions=restrictions, loads=loads,
+                    distributed_loads=distributed_loads)
 
     print(f"\n{'=' * 60}")
     print(f"  Plain I-beam: {name}")
@@ -239,6 +279,7 @@ def generate(cfg: Config,
     print(f"  Support ribs: {support_rib_elem_count} quad")
     print(f"  Constraints: {len(restrictions)}")
     print(f"  Loads      : {len(loads)}")
+    print(f"  Distributed loads: {len(distributed_loads)}")
     print(f"  Total el.  : {len(elements)}")
     print(f"  File       : {filepath}")
 
