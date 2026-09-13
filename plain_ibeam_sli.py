@@ -43,7 +43,7 @@ from sli_writer import write_plate_sli
 
 
 def generate(cfg: Config,
-             E: float = 2.02027e7, nu: float = 0.28, rho: float = 7850.0,
+             E: float = 2.02027e7, nu: float = 0.28, rho: float = 7.8500,
              name: str = "plain_ibeam", output: str = "plain_ibeam.sli"):
     """Будує структуровану сітку суцільної балки, зберігає .sli."""
 
@@ -112,6 +112,90 @@ def generate(cfg: Config,
                 eid += 1
                 flange_count += 1
 
+    # ── Вертикальні ребра жорсткості ────────────────────────
+    rib_elem_count = 0
+    support_rib_elem_count = 0
+    rib_x_tol = 1e-6
+    rib_y_tol = 1e-6
+
+    # Середнє ребро (x=0, площина YOZ)
+    z_axis = {}  # round(z,8) → node_id
+    for node in nodes:
+        if abs(node.x) < rib_x_tol and abs(node.y) < rib_y_tol:
+            z_axis[round(node.z, 8)] = node.id
+
+    if z_axis:
+        z_vals = sorted(z_axis.keys())
+        rib_lookup = {}  # (y_round, z_round) → node_id
+        for node in nodes:
+            if abs(node.x) < rib_x_tol:
+                key = (round(node.y, 6), round(node.z, 6))
+                rib_lookup[key] = node.id
+
+        dy = bf / (2 * cfg.nb)
+        rib_grid = {}
+        for iz, zv in enumerate(z_vals):
+            for iy in range(-cfg.nb, cfg.nb + 1):
+                y_val = round(iy * dy, 8)
+                key = (round(y_val, 6), round(zv, 6))
+                if key in rib_lookup:
+                    rib_grid[(iz, iy)] = rib_lookup[key]
+                else:
+                    nid += 1
+                    nodes.append(Node(nid, 0.0, y_val, zv))
+                    rib_lookup[key] = nid
+                    rib_grid[(iz, iy)] = nid
+
+        for iz in range(len(z_vals) - 1):
+            for iy in range(-cfg.nb, cfg.nb):
+                n1 = rib_grid[(iz, iy)]
+                n2 = rib_grid[(iz + 1, iy)]
+                n3 = rib_grid[(iz + 1, iy + 1)]
+                n4 = rib_grid[(iz, iy + 1)]
+                elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
+                eid += 1
+                rib_elem_count += 1
+
+    # Опорні ребра (x=±L/2, площина YOZ)
+    for support_x in [-L / 2, L / 2]:
+        z_support_axis = {}  # round(z,8) → node_id
+        for node in nodes:
+            if abs(node.x - support_x) < rib_x_tol and abs(node.y) < rib_y_tol:
+                zk = round(node.z, 8)
+                if zk not in z_support_axis:
+                    z_support_axis[zk] = node.id
+
+        if z_support_axis:
+            z_support_vals = sorted(z_support_axis.keys())
+            support_lookup = {}  # (y_round, z_round) → node_id
+            for node in nodes:
+                if abs(node.x - support_x) < rib_x_tol:
+                    key = (round(node.y, 6), round(node.z, 6))
+                    support_lookup[key] = node.id
+
+            support_grid = {}
+            for iz, zv in enumerate(z_support_vals):
+                for iy in range(-cfg.nb, cfg.nb + 1):
+                    y_val = round(iy * dy, 8)
+                    key = (round(y_val, 6), round(zv, 6))
+                    if key in support_lookup:
+                        support_grid[(iz, iy)] = support_lookup[key]
+                    else:
+                        nid += 1
+                        nodes.append(Node(nid, support_x, y_val, zv))
+                        support_lookup[key] = nid
+                        support_grid[(iz, iy)] = nid
+
+            for iz in range(len(z_support_vals) - 1):
+                for iy in range(-cfg.nb, cfg.nb):
+                    n1 = support_grid[(iz, iy)]
+                    n2 = support_grid[(iz + 1, iy)]
+                    n3 = support_grid[(iz + 1, iy + 1)]
+                    n4 = support_grid[(iz, iy + 1)]
+                    elements.append(Quad(eid, n1, n2, n3, n4, mat=1))
+                    eid += 1
+                    support_rib_elem_count += 1
+
     # ── В'язі (опори) ────────────────────────────────────────
     restrictions = []
     tol = 1e-6
@@ -151,6 +235,8 @@ def generate(cfg: Config,
     print(f"  Вузлів     : {len(nodes)}")
     print(f"  Стінка     : {web_count} quad")
     print(f"  Полиці     : {flange_count} quad")
+    print(f"  Mid rib    : {rib_elem_count} quad")
+    print(f"  Support ribs: {support_rib_elem_count} quad")
     print(f"  Constraints: {len(restrictions)}")
     print(f"  Loads      : {len(loads)}")
     print(f"  Total el.  : {len(elements)}")
