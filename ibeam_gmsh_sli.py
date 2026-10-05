@@ -73,7 +73,7 @@ def _get_arc_num_nodes(fillet, target_step: float = 0.001, min_nodes: int = 6) -
     return num_nodes
 
 
-def generate(cfg: Config, mesh_size: float = 0.02,
+def generate(cfg: Config, mesh_size: float = 0.01,
              use_quads: bool = False,
              E: float = 2.02027e7, nu: float = 0.28, rho: float = 7.850,
              name: str = "meander", output: str = "meander.sli",
@@ -114,11 +114,11 @@ def generate(cfg: Config, mesh_size: float = 0.02,
     # ── Допоміжна функція: створити gmsh-точку ───────────────
     point_cache = {}
 
-    def add_pt(x: float, z: float) -> int:
+    def add_pt(x: float, z: float, size: float = 0.01) -> int:
         """Створює gmsh-точку в площині XOZ (y=0)."""
         key = (round(x, 10), round(z, 10))
         if key not in point_cache:
-            point_cache[key] = geo.addPoint(x, 0, z, mesh_size)
+            point_cache[key] = geo.addPoint(x, 0, z, size)
         return point_cache[key]
 
     # ── Будуємо криві меандру ─────────────────────────────────
@@ -159,10 +159,10 @@ def generate(cfg: Config, mesh_size: float = 0.02,
                 meander_curves.append(c)
                 _track(p1_id, item.p1.x, item.p1.y)
 
-            # Дуга філлету з розрахованою кількістю вузлів для кроку 0.001
+            # Дуга філлету з розрахованою кількістю вузлів для кроку 0.002
             arc_tag = geo.addCircleArc(p1_id, pc_id, p2_id)
             curves.append(arc_tag)
-            num_nodes = _get_arc_num_nodes(item, target_step=0.001, min_nodes=6)
+            num_nodes = _get_arc_num_nodes(item, target_step=0.002, min_nodes=6)
             arc_curves_with_nodes.append((arc_tag, num_nodes))
             meander_curves.append(arc_tag)
             _track(p2_id, item.p2.x, item.p2.y)
@@ -217,16 +217,16 @@ def generate(cfg: Config, mesh_size: float = 0.02,
 
     # ── Замикаючі лінії ──────────────────────────────────────
     # Кінець меандру → (length, -height - h2)
-    p_br = add_pt(cfg.length, last_y - cfg.h2)
+    p_br = add_pt(cfg.length, last_y - cfg.h2, 0.01)
     curves.append(geo.addLine(prev_pt_id, p_br))
 
-    # → (0, -h1)  — edgeLine (нижня грань стінки)
-    p_bl = add_pt(0, -cfg.h1)
+    # → (0, -h1)  — edgeLine (нижня грань стінки) з mesh_size 0.02 для полиці
+    p_bl = add_pt(0, -cfg.h1, 0.02)
     edge_line_tag = geo.addLine(p_br, p_bl)
     curves.append(edge_line_tag)
 
     # → (0, -height) — замикання до початку меандру
-    p_start = add_pt(0, -cfg.height)
+    p_start = add_pt(0, -cfg.height, 0.01)
     curves.append(geo.addLine(p_bl, p_start))
 
     # ── Поверхня стінки ──────────────────────────────────────
